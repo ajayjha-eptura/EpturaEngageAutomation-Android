@@ -1,0 +1,303 @@
+# Azure Pipeline for Eptura Engage Android Automation
+# This pipeline builds and runs Android Appium tests
+
+trigger:
+  branches:
+    include:
+      - main
+      - master
+      - develop
+  paths:
+    exclude:
+      - README.md
+      - docs/**
+
+pr:
+  branches:
+    include:
+      - main
+      - master
+      - develop
+
+# Pipeline variables
+variables:
+  mavenPOMFile: 'pom.xml'
+  jdkVersion: '1.11'
+  appiumVersion: '2.19.0'
+  androidSdkVersion: '30'
+  testResultsFolder: '$(System.DefaultWorkingDirectory)/target/surefire-reports'
+  screenshotsFolder: '$(System.DefaultWorkingDirectory)/target/screenshots'
+  extentReportFolder: '$(System.DefaultWorkingDirectory)/target'
+
+# Agent pool - Use Microsoft-hosted agents or self-hosted agents with Android SDK
+pool:
+  vmImage: 'macOS-latest'  # macOS agents have Android SDK pre-installed
+  # For self-hosted Windows agents with Android devices, use:
+  # name: 'YourSelfHostedPool'
+
+stages:
+  - stage: Build
+    displayName: 'Build Stage'
+    jobs:
+      - job: MavenBuild
+        displayName: 'Build Maven Project'
+        steps:
+          - task: JavaToolInstaller@0
+            displayName: 'Install Java JDK 11'
+            inputs:
+              versionSpec: '11'
+              jdkArchitectureOption: 'x64'
+              jdkSourceOption: 'PreInstalled'
+
+          - task: Maven@3
+            displayName: 'Maven Clean Compile'
+            inputs:
+              mavenPomFile: '$(mavenPOMFile)'
+              goals: 'clean compile'
+              options: '-DskipTests'
+              publishJUnitResults: false
+              javaHomeOption: 'JDKVersion'
+              jdkVersionOption: '$(jdkVersion)'
+              mavenVersionOption: 'Default'
+              mavenOptions: '-Xmx3072m'
+              mavenAuthenticateFeed: false
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Build Artifacts'
+            inputs:
+              PathtoPublish: '$(System.DefaultWorkingDirectory)/target'
+              ArtifactName: 'build-output'
+              publishLocation: 'Container'
+
+  - stage: Test
+    displayName: 'Test Stage'
+    dependsOn: Build
+    jobs:
+      - job: AndroidTests
+        displayName: 'Run Android Appium Tests'
+        timeoutInMinutes: 90
+        steps:
+          - task: JavaToolInstaller@0
+            displayName: 'Install Java JDK 11'
+            inputs:
+              versionSpec: '11'
+              jdkArchitectureOption: 'x64'
+              jdkSourceOption: 'PreInstalled'
+
+          - task: NodeTool@0
+            displayName: 'Install Node.js'
+            inputs:
+              versionSpec: '18.x'
+
+          # Install Android SDK (if not using macOS agent with pre-installed SDK)
+          - bash: |
+              echo "📱 Setting up Android SDK..."
+              export ANDROID_HOME=$HOME/android-sdk
+              export PATH=$PATH:$ANDROID_HOME/tools:$ANDROID_HOME/platform-tools
+              
+              # Check if Android SDK is already installed
+              if [ ! -d "$ANDROID_HOME" ]; then
+                echo "Installing Android SDK..."
+                mkdir -p $ANDROID_HOME
+                cd $ANDROID_HOME
+                wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+                unzip -q commandlinetools-linux-9477386_latest.zip
+                mkdir -p cmdline-tools/latest
+                mv cmdline-tools/* cmdline-tools/latest/ || true
+                export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+                yes | sdkmanager --licenses || true
+                sdkmanager "platform-tools" "platforms;android-$(androidSdkVersion)" "build-tools;30.0.3"
+              fi
+              
+              echo "✅ Android SDK setup complete"
+              echo "##vso[task.setvariable variable=ANDROID_HOME]$ANDROID_HOME"
+            displayName: 'Setup Android SDK'
+            condition: eq(variables['Agent.OS'], 'Linux')
+
+          # For macOS agents (already have Android SDK)
+          - bash: |
+              echo "📱 Configuring Android SDK on macOS..."
+              export ANDROID_HOME=$ANDROID_SDK_ROOT
+              export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
+              echo "ANDROID_HOME: $ANDROID_HOME"
+              echo "##vso[task.setvariable variable=ANDROID_HOME]$ANDROID_HOME"
+            displayName: 'Configure Android SDK (macOS)'
+            condition: eq(variables['Agent.OS'], 'Darwin')
+
+          - task: Npm@1
+            displayName: 'Install Appium'
+            inputs:
+              command: 'custom'
+              customCommand: 'install -g appium@$(appiumVersion)'
+
+          - bash: |
+              echo "🔌 Installing Appium UiAutomator2 Driver..."
+              appium driver install uiautomator2
+              appium driver list
+              echo "✅ Appium drivers installed"
+            displayName: 'Install Appium Drivers'
+
+          - bash: |
+              echo "📱 Checking for connected Android devices..."
+              adb devices -l
+              echo "Current ADB devices:"
+              adb devices
+              
+              # Wait for device to be ready
+              timeout=60
+              while [ $timeout -gt 0 ]; do
+                device_count=$(adb devices | grep -c "device$")
+                if [ $device_count -gt 0 ]; then
+                  echo "✅ Android device detected!"
+                  adb shell getprop ro.build.version.release
+                  break
+                fi
+                echo "Waiting for device... ($timeout seconds remaining)"
+                sleep 5
+                timeout=$((timeout-5))
+              done
+            displayName: 'Detect Android Device'
+            continueOnError: true
+
+          # Download build artifacts from previous stage
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download Build Artifacts'
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'build-output'
+              downloadPath: '$(System.DefaultWorkingDirectory)'
+
+          - bash: |
+              echo "🚀 Starting Appium Server..."
+              mkdir -p logs
+              appium --address 127.0.0.1 --port 4723 --session-override --log-level warn > logs/appium.log 2>&1 &
+              APPIUM_PID=$!
+              echo "Appium PID: $APPIUM_PID"
+              echo "##vso[task.setvariable variable=APPIUM_PID]$APPIUM_PID"
+              
+              # Wait for Appium to start
+              sleep 10
+              
+              # Verify Appium is running
+              if curl -s http://127.0.0.1:4723/status > /dev/null; then
+                echo "✅ Appium server is running"
+              else
+                echo "❌ Appium server failed to start"
+                cat logs/appium.log
+                exit 1
+              fi
+            displayName: 'Start Appium Server'
+
+          - task: Maven@3
+            displayName: 'Run TestNG Tests'
+            inputs:
+              mavenPomFile: '$(mavenPOMFile)'
+              goals: 'test'
+              options: '-Dtestng.xml=testng.xml'
+              publishJUnitResults: true
+              testResultsFiles: '**/surefire-reports/TEST-*.xml'
+              testRunTitle: 'Android Appium Tests'
+              javaHomeOption: 'JDKVersion'
+              jdkVersionOption: '$(jdkVersion)'
+              mavenVersionOption: 'Default'
+              mavenOptions: '-Xmx3072m'
+              mavenAuthenticateFeed: false
+            continueOnError: true
+
+          - bash: |
+              echo "🛑 Stopping Appium Server..."
+              if [ ! -z "$APPIUM_PID" ]; then
+                kill $APPIUM_PID || true
+                echo "Appium server stopped"
+              fi
+            displayName: 'Stop Appium Server'
+            condition: always()
+
+          # Publish Test Results
+          - task: PublishTestResults@2
+            displayName: 'Publish Test Results'
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: '**/surefire-reports/TEST-*.xml'
+              mergeTestResults: true
+              failTaskOnFailedTests: false
+              testRunTitle: 'Eptura Android Automation Tests'
+            condition: always()
+
+          # Publish Screenshots
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Screenshots'
+            inputs:
+              PathtoPublish: '$(screenshotsFolder)'
+              ArtifactName: 'test-screenshots'
+              publishLocation: 'Container'
+            condition: always()
+
+          # Publish Extent Reports
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Extent Report'
+            inputs:
+              PathtoPublish: '$(extentReportFolder)/Extent-report.html'
+              ArtifactName: 'extent-report'
+              publishLocation: 'Container'
+            condition: always()
+
+          # Publish TestNG Reports
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish TestNG Reports'
+            inputs:
+              PathtoPublish: '$(System.DefaultWorkingDirectory)/test-output'
+              ArtifactName: 'testng-reports'
+              publishLocation: 'Container'
+            condition: always()
+
+          # Publish Appium Logs
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Appium Logs'
+            inputs:
+              PathtoPublish: '$(System.DefaultWorkingDirectory)/logs'
+              ArtifactName: 'appium-logs'
+              publishLocation: 'Container'
+            condition: always()
+
+  - stage: Report
+    displayName: 'Generate Reports'
+    dependsOn: Test
+    condition: always()
+    jobs:
+      - job: GenerateReports
+        displayName: 'Generate Test Reports'
+        steps:
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download Test Artifacts'
+            inputs:
+              buildType: 'current'
+              downloadType: 'specific'
+              itemPattern: '**'
+              downloadPath: '$(System.DefaultWorkingDirectory)/artifacts'
+
+          - bash: |
+              echo "📊 Test Execution Summary"
+              echo "=========================="
+              if [ -d "artifacts/test-screenshots" ]; then
+                echo "Screenshots captured: $(find artifacts/test-screenshots -type f | wc -l)"
+              fi
+              
+              if [ -f "artifacts/extent-report/Extent-report.html" ]; then
+                echo "✅ Extent Report generated"
+              fi
+              
+              if [ -d "artifacts/testng-reports" ]; then
+                echo "✅ TestNG Reports generated"
+              fi
+            displayName: 'Test Summary'
+            condition: always()
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Combined Reports'
+            inputs:
+              targetPath: '$(System.DefaultWorkingDirectory)/artifacts'
+              artifact: 'all-test-reports'
+              publishLocation: 'pipeline'
+            condition: always()

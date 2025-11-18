@@ -38,7 +38,7 @@ public class AppiumServerManager {
 
                     .withArgument(GeneralServerFlag.SESSION_OVERRIDE) 
 
-                    .withArgument(GeneralServerFlag.LOG_LEVEL, "info") 
+                    .withArgument(GeneralServerFlag.LOG_LEVEL, "warn") 
 
                     .build();
 
@@ -99,4 +99,3 @@ public class AppiumServerManager {
     }
 
 }
- 
