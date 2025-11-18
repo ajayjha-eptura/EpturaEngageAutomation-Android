@@ -18,13 +18,13 @@ public class TestRunner extends AbstractTestNGCucumberTests {
     public void beforeClass(ITestContext context) {
         // Reset the last test flag at the beginning of the test run
         Hooks.setLastTest(false);
-        System.out.println("Starting test execution with " + context.getAllTestMethods().length + " test methods");
+        System.out.println("🚀 Starting test execution with " + context.getAllTestMethods().length + " test methods");
     }
     
     @AfterClass
     public void afterClass() {
         // Set the last test flag to true when all tests are complete
         Hooks.setLastTest(true);
-        System.out.println("Test execution complete - preventing further app restarts");
+        System.out.println("✅ Test execution complete - preventing further app restarts");
     }
 }

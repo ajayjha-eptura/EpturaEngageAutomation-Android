@@ -40,7 +40,7 @@ public class Utility {
 	public static String getTextFromid(By locator,int timeoutInSeconds)
 	{
 		WebElement element = waitForElementUntilPresent(locator,timeoutInSeconds);
-		String value = element.findElement(locator).getText();
+		String value = element.getText();
 		return value;
 	}
     /**

@@ -1,0 +1,140 @@
+image: maven:3.8-openjdk-11
+
+variables:
+  ANDROID_SDK_TOOLS: "9477386"
+  ANDROID_HOME: "$CI_PROJECT_DIR/android-sdk"
+  APPIUM_VERSION: "2.19.0"
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+
+stages:
+  - setup
+  - build
+  - test
+  - report
+  - deploy
+
+cache:
+  paths:
+    - .m2/repository/
+    - android-sdk/
+    - node_modules/
+
+before_script:
+  - echo "🚀 Starting Android Automation Tests"
+  - java -version
+  - mvn -version
+
+setup:android-sdk:
+  stage: setup
+  script:
+    - apt-get update -qq
+    - apt-get install -y wget unzip nodejs npm
+    - |
+      if [ ! -d "$ANDROID_HOME" ]; then
+        echo "📱 Installing Android SDK..."
+        mkdir -p $ANDROID_HOME
+        cd $ANDROID_HOME
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_SDK_TOOLS}_latest.zip
+        unzip -q commandlinetools-linux-${ANDROID_SDK_TOOLS}_latest.zip
+        mkdir -p cmdline-tools/latest
+        mv cmdline-tools/* cmdline-tools/latest/ || true
+        export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+        yes | sdkmanager --licenses || true
+        sdkmanager "platform-tools" "platforms;android-30" "emulator"
+      fi
+    - export PATH=$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH
+    - echo "✅ Android SDK setup complete"
+  cache:
+    key: android-sdk-cache
+    paths:
+      - android-sdk/
+
+setup:appium:
+  stage: setup
+  script:
+    - apt-get update -qq && apt-get install -y nodejs npm
+    - npm install -g appium@${APPIUM_VERSION}
+    - appium driver install uiautomator2
+    - appium -v
+    - echo "✅ Appium installed successfully"
+
+build:
+  stage: build
+  script:
+    - echo "🏗️ Building the project..."
+    - mvn clean compile -DskipTests
+  artifacts:
+    paths:
+      - target/
+    expire_in: 1 hour
+
+test:android:
+  stage: test
+  dependencies:
+    - build
+  before_script:
+    - apt-get update -qq && apt-get install -y nodejs npm wget unzip
+    - npm install -g appium@${APPIUM_VERSION}
+    - appium driver install uiautomator2
+    - export PATH=$ANDROID_HOME/platform-tools:$PATH
+  script:
+    - echo "🚀 Starting Appium server..."
+    - appium --address 127.0.0.1 --port 4723 --session-override > appium.log 2>&1 &
+    - sleep 10
+    - echo "🧪 Running tests..."
+    - mvn test -Dtestng.xml=testng.xml || true
+  artifacts:
+    when: always
+    paths:
+      - target/screenshots/
+      - target/Extent-report.html
+      - target/surefire-reports/
+      - test-output/
+      - appium.log
+    expire_in: 30 days
+    reports:
+      junit: target/surefire-reports/*.xml
+  allow_failure: false
+
+report:generate:
+  stage: report
+  dependencies:
+    - test:android
+  script:
+    - echo "📊 Generating comprehensive reports..."
+  artifacts:
+    when: always
+    paths:
+      - target/Extent-report.html
+      - test-output/
+    expire_in: 90 days
+
+# Optional: Deploy reports to a web server
+deploy:reports:
+  stage: deploy
+  dependencies:
+    - report:generate
+  script:
+    - echo "📤 Deploying reports to web server..."
+    # Add your deployment script here
+    # Example: scp -r target/Extent-report.html user@server:/var/www/reports/
+  only:
+    - main
+    - master
+  when: manual
+
+# Scheduled test execution
+scheduled:nightly:
+  stage: test
+  script:
+    - echo "🌙 Running nightly test suite..."
+    - mvn clean test -Dtestng.xml=testng.xml
+  only:
+    - schedules
+  artifacts:
+    when: always
+    paths:
+      - target/screenshots/
+      - target/Extent-report.html
+      - test-output/
+    expire_in: 7 days

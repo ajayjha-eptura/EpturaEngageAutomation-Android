@@ -20,7 +20,7 @@ public class LoginStepDef {
    @Given("User is on Login page")
    public void UserLogin() throws MalformedURLException, InterruptedException
 	{
-		System.out.println("App Launched");
+		System.out.println("📱 App Launched");
 		// Ensure we're on the login page by checking for login elements or logging out if needed
 		loginPage.ensureLoginPageIsDisplayed();
 	}

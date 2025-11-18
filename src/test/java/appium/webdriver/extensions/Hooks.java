@@ -1,10 +1,6 @@
 package appium.webdriver.extensions;
 import appium.webdriver.reporting.ExtentReportManager;
 import io.cucumber.java.*;
-import io.cucumber.plugin.event.EventPublisher;
-import io.cucumber.plugin.event.TestRunFinished;
-import io.cucumber.plugin.event.TestRunStarted;
-import io.cucumber.plugin.event.TestSourceRead;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class Hooks {
