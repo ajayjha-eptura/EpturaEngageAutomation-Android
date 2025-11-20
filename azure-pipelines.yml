@@ -22,8 +22,8 @@ pr:
 # Pipeline variables
 variables:
   mavenPOMFile: 'pom.xml'
-  jdkVersion: '1.11'
-  appiumVersion: '2.19.0'
+  jdkVersion: '11'  # Fixed: Changed from '1.11' to '11'
+  appiumVersion: '2.11.5'  # Fixed: Changed from '2.19.0' to stable version
   androidSdkVersion: '30'
   testResultsFolder: '$(System.DefaultWorkingDirectory)/target/surefire-reports'
   screenshotsFolder: '$(System.DefaultWorkingDirectory)/target/screenshots'
