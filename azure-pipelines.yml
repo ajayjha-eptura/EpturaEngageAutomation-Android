@@ -31,7 +31,8 @@ variables:
 
 # Agent pool - Use Microsoft-hosted agents or self-hosted agents with Android SDK
 pool:
-  vmImage: 'macOS-latest'  # macOS agents have Android SDK pre-installed
+  vmImage: 'macOS-latest'  # Using macOS agents which have Android SDK pre-installed
+  # For Windows agents, use: vmImage: 'windows-latest'
   # For self-hosted Windows agents with Android devices, use:
   # name: 'YourSelfHostedPool'
 
@@ -49,7 +50,7 @@ stages:
               jdkArchitectureOption: 'x64'
               jdkSourceOption: 'PreInstalled'
 
-          - task: Maven@3
+          - task: Maven@4
             displayName: 'Maven Clean Compile'
             inputs:
               mavenPomFile: '$(mavenPOMFile)'
@@ -60,7 +61,6 @@ stages:
               jdkVersionOption: '$(jdkVersion)'
               mavenVersionOption: 'Default'
               mavenOptions: '-Xmx3072m'
-              mavenAuthenticateFeed: false
 
           - task: PublishBuildArtifacts@1
             displayName: 'Publish Build Artifacts'
@@ -124,6 +124,37 @@ stages:
             displayName: 'Configure Android SDK (macOS)'
             condition: eq(variables['Agent.OS'], 'Darwin')
 
+          # For Windows agents - Install Android SDK Command-line Tools
+          - powershell: |
+              $ErrorActionPreference = "Stop"
+              
+              # Define Android SDK paths
+              $androidSdkRoot = "$env:USERPROFILE\AppData\Local\Android\Sdk"
+              $cmdlineToolsZip = "commandlinetools-win-9477386_latest.zip"
+              
+              # Check if Android SDK is already installed
+              if (-Not (Test-Path $androidSdkRoot)) {
+                Write-Host "Installing Android SDK..."
+                mkdir $androidSdkRoot
+                
+                # Download and install Command-line Tools
+                Invoke-WebRequest -Uri "https://dl.google.com/android/repository/$cmdlineToolsZip" -OutFile $cmdlineToolsZip
+                Expand-Archive -Path $cmdlineToolsZip -DestinationPath $androidSdkRoot -Force
+                Remove-Item -Path $cmdlineToolsZip
+                
+                # Set environment variables
+                [System.Environment]::SetEnvironmentVariable("ANDROID_HOME", $androidSdkRoot, [System.EnvironmentVariableTarget]::User)
+                [System.Environment]::SetEnvironmentVariable("PATH", "$env:PATH;$androidSdkRoot\cmdline-tools\latest\bin;$androidSdkRoot\platform-tools;$androidSdkRoot\emulator", [System.EnvironmentVariableTarget]::User)
+                
+                # Accept licenses and install SDK components
+                & "$androidSdkRoot\cmdline-tools\latest\bin\sdkmanager" --licenses
+                & "$androidSdkRoot\cmdline-tools\latest\bin\sdkmanager" "platform-tools" "platforms;android-$(androidSdkVersion)" "build-tools;30.0.3"
+              }
+              
+              Write-Host "✅ Android SDK setup complete"
+            displayName: 'Setup Android SDK (Windows)'
+            condition: eq(variables['Agent.OS'], 'Windows_NT')
+
           - task: Npm@1
             displayName: 'Install Appium'
             inputs:
@@ -132,9 +163,33 @@ stages:
 
           - bash: |
               echo "🔌 Installing Appium UiAutomator2 Driver..."
+              
+              # Verify Appium is installed
+              if ! command -v appium &> /dev/null; then
+                echo "❌ Appium is not installed!"
+                exit 1
+              fi
+              
+              echo "Appium version:"
+              appium --version
+              
+              # Install UiAutomator2 driver
+              echo "Installing uiautomator2 driver..."
               appium driver install uiautomator2
-              appium driver list
-              echo "✅ Appium drivers installed"
+              
+              # Verify driver installation
+              echo "Listing installed drivers:"
+              appium driver list --installed
+              
+              # Check if uiautomator2 is in the list
+              if appium driver list --installed | grep -q "uiautomator2"; then
+                echo "✅ UiAutomator2 driver successfully installed"
+              else
+                echo "❌ UiAutomator2 driver installation failed"
+                echo "Available drivers:"
+                appium driver list
+                exit 1
+              fi
             displayName: 'Install Appium Drivers'
 
           - bash: |
@@ -189,7 +244,7 @@ stages:
               fi
             displayName: 'Start Appium Server'
 
-          - task: Maven@3
+          - task: Maven@4
             displayName: 'Run TestNG Tests'
             inputs:
               mavenPomFile: '$(mavenPOMFile)'
@@ -202,7 +257,6 @@ stages:
               jdkVersionOption: '$(jdkVersion)'
               mavenVersionOption: 'Default'
               mavenOptions: '-Xmx3072m'
-              mavenAuthenticateFeed: false
             continueOnError: true
 
           - bash: |
