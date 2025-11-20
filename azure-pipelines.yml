@@ -87,7 +87,7 @@ stages:
           - task: NodeTool@0
             displayName: 'Install Node.js'
             inputs:
-              versionSpec: '18.x'
+              versionSpec: '20.x'
 
           # Install Android SDK (if not using macOS agent with pre-installed SDK)
           - bash: |
