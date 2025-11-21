@@ -254,7 +254,20 @@ stages:
               done
               
               echo "✅ Boot completed! Waiting for system to stabilize..."
-              sleep 20
+              sleep 30
+              
+              # Wait for package manager to be ready
+              echo "⏳ Waiting for package manager service..."
+              for i in {1..30}; do
+                if adb shell pm list packages > /dev/null 2>&1; then
+                  echo "✅ Package manager is ready"
+                  break
+                fi
+                if [ $i -eq 30 ]; then
+                  echo "⚠️ Package manager took longer than expected to start"
+                fi
+                sleep 2
+              done
               
               # Verify emulator is ready
               echo "📱 Emulator status:"
@@ -263,10 +276,18 @@ stages:
               echo "API Level: $(adb shell getprop ro.build.version.sdk)"
               
               # Check for Google Play Store
+              echo "🔍 Checking for Google Play Store..."
               if adb shell pm list packages | grep -q "com.android.vending"; then
                 echo "✅ Google Play Store is present!"
+                PLAY_STORE_VERSION=$(adb shell dumpsys package com.android.vending | grep versionName | head -1 | awk '{print $1}')
+                echo "Play Store: $PLAY_STORE_VERSION"
               else
-                echo "⚠️ Google Play Store not found - may need manual setup"
+                echo "⚠️ Google Play Store not found"
+                echo "📋 Checking Google services packages:"
+                adb shell pm list packages | grep -i google | head -10 || echo "No Google packages found"
+                echo ""
+                echo "Note: Some system images may not include Play Store initially."
+                echo "The emulator is running and tests can continue if APK installation is used."
               fi
               
               # Get emulator serial
