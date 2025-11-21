@@ -1,0 +1,450 @@
+# Azure Pipeline for Eptura Engage Android Automation
+# This pipeline creates an emulator with Google Play Store and installs app from Play Store
+
+trigger:
+  branches:
+    include:
+      - main
+      - master
+      - develop
+  paths:
+    exclude:
+      - README.md
+      - docs/**
+
+pr:
+  branches:
+    include:
+      - main
+      - master
+      - develop
+
+# Pipeline variables
+variables:
+  mavenPOMFile: 'pom.xml'
+  jdkVersion: '11'
+  appiumVersion: '3.0.0'
+  androidSdkVersion: '30'
+  testResultsFolder: '$(System.DefaultWorkingDirectory)/target/surefire-reports'
+  screenshotsFolder: '$(System.DefaultWorkingDirectory)/target/screenshots'
+  extentReportFolder: '$(System.DefaultWorkingDirectory)/target'
+  emulatorName: 'test_emulator_playstore'
+
+# Agent pool - Use Microsoft-hosted macOS agents
+pool:
+  vmImage: 'macOS-13'
+
+stages:
+  - stage: Build
+    displayName: 'Build Stage'
+    jobs:
+      - job: MavenBuild
+        displayName: 'Build Maven Project'
+        steps:
+          - task: JavaToolInstaller@0
+            displayName: 'Install Java JDK 11'
+            inputs:
+              versionSpec: '11'
+              jdkArchitectureOption: 'x64'
+              jdkSourceOption: 'PreInstalled'
+
+          - task: Maven@4
+            displayName: 'Maven Clean Compile'
+            inputs:
+              mavenPomFile: '$(mavenPOMFile)'
+              goals: 'clean compile'
+              options: '-DskipTests'
+              publishJUnitResults: false
+              javaHomeOption: 'JDKVersion'
+              jdkVersionOption: '$(jdkVersion)'
+              mavenVersionOption: 'Default'
+              mavenOptions: '-Xmx3072m'
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Build Artifacts'
+            inputs:
+              PathtoPublish: '$(System.DefaultWorkingDirectory)/target'
+              ArtifactName: 'build-output'
+              publishLocation: 'Container'
+
+  - stage: Test
+    displayName: 'Test Stage'
+    dependsOn: Build
+    jobs:
+      - job: AndroidTests
+        displayName: 'Run Android Appium Tests'
+        timeoutInMinutes: 120
+        steps:
+          - task: JavaToolInstaller@0
+            displayName: 'Install Java JDK 11'
+            inputs:
+              versionSpec: '11'
+              jdkArchitectureOption: 'x64'
+              jdkSourceOption: 'PreInstalled'
+
+          - task: NodeTool@0
+            displayName: 'Install Node.js'
+            inputs:
+              versionSpec: '20.x'
+
+          - bash: |
+              echo "🐍 Installing Python dependencies for Play Store installer..."
+              python3 --version
+              pip3 --version
+              
+              # Install Appium Python client and dependencies
+              pip3 install --upgrade pip
+              pip3 install Appium-Python-Client
+              pip3 install selenium
+              
+              echo "✅ Python dependencies installed"
+              pip3 list | grep -i appium
+            displayName: 'Install Python Dependencies'
+
+          - bash: |
+              echo "📱 Configuring Android SDK with Google Play support..."
+              
+              export ANDROID_HOME=$ANDROID_SDK_ROOT
+              export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin
+              
+              echo "ANDROID_HOME: $ANDROID_HOME"
+              ls -la $ANDROID_HOME/
+              
+              # Accept all licenses
+              yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+              
+              # Install SDK components with Google Play Store support
+              echo "📦 Installing SDK components with Google Play Store..."
+              $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+                "platform-tools" \
+                "platforms;android-30" \
+                "build-tools;30.0.3" \
+                "emulator" \
+                "system-images;android-30;google_apis_playstore;x86_64"
+              
+              echo "✅ SDK components installed"
+              
+              # Verify ADB
+              adb version
+              
+              # Set environment variables
+              echo "##vso[task.setvariable variable=ANDROID_HOME]$ANDROID_HOME"
+              echo "##vso[task.setvariable variable=PATH]$PATH"
+            displayName: 'Setup Android SDK with Google Play'
+
+          - bash: |
+              echo "📱 Creating Android Emulator with Google Play Store..."
+              
+              export ANDROID_HOME=$ANDROID_SDK_ROOT
+              export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin
+              
+              # Verify system image exists
+              if [ ! -d "$ANDROID_HOME/system-images/android-30/google_apis_playstore/x86_64" ]; then
+                echo "❌ Google Play system image not found!"
+                ls -la $ANDROID_HOME/system-images/
+                exit 1
+              fi
+              
+              echo "✅ Google Play system image found"
+              
+              # Delete existing emulator if present
+              $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager delete avd -n $(emulatorName) || true
+              
+              # Create new emulator with Google Play
+              echo "Creating emulator with Google Play Store support..."
+              echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
+                --force \
+                --name "$(emulatorName)" \
+                --package "system-images;android-30;google_apis_playstore;x86_64" \
+                --device "pixel_4" \
+                --abi x86_64
+              
+              # Verify emulator was created
+              if $ANDROID_HOME/emulator/emulator -list-avds | grep -q "$(emulatorName)"; then
+                echo "✅ Emulator '$(emulatorName)' created successfully"
+              else
+                echo "❌ Failed to create emulator"
+                exit 1
+              fi
+              
+              # Start emulator
+              echo "🚀 Starting emulator..."
+              nohup $ANDROID_HOME/emulator/emulator -avd $(emulatorName) \
+                -no-snapshot-save \
+                -no-window \
+                -no-audio \
+                -gpu swiftshader_indirect \
+                -memory 4096 \
+                -cores 2 \
+                -wipe-data \
+                > emulator.log 2>&1 &
+              
+              EMULATOR_PID=$!
+              echo "Emulator PID: $EMULATOR_PID"
+              echo "##vso[task.setvariable variable=EMULATOR_PID]$EMULATOR_PID"
+              
+              # Wait for device
+              echo "⏳ Waiting for emulator to be online..."
+              adb wait-for-device
+              
+              # Wait for boot completion
+              echo "⏳ Waiting for boot to complete..."
+              timeout=300
+              elapsed=0
+              until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; do
+                if [ $elapsed -ge $timeout ]; then
+                  echo "❌ Boot timeout after $timeout seconds"
+                  echo "=== Emulator Log ==="
+                  tail -100 emulator.log
+                  exit 1
+                fi
+                sleep 5
+                elapsed=$((elapsed+5))
+                echo "Still booting... ($elapsed/$timeout seconds)"
+              done
+              
+              echo "✅ Boot completed! Waiting for system to stabilize..."
+              sleep 20
+              
+              # Verify emulator is ready
+              adb devices -l
+              echo "Android version: $(adb shell getprop ro.build.version.release)"
+              
+              # Check for Google Play Store
+              if adb shell pm list packages | grep -q "com.android.vending"; then
+                echo "✅ Google Play Store is present!"
+              else
+                echo "⚠️ Google Play Store not found - may need manual setup"
+              fi
+              
+              # Get emulator serial
+              EMULATOR_SERIAL=$(adb devices | grep "emulator" | head -1 | awk '{print $1}')
+              echo "Emulator Serial: $EMULATOR_SERIAL"
+              echo "##vso[task.setvariable variable=EMULATOR_SERIAL]$EMULATOR_SERIAL"
+            displayName: 'Create and Start Emulator with Google Play'
+
+          - task: Npm@1
+            displayName: 'Install Appium'
+            inputs:
+              command: 'custom'
+              customCommand: 'install -g appium@$(appiumVersion)'
+
+          - bash: |
+              echo "🔌 Installing Appium UiAutomator2 Driver..."
+              appium driver install uiautomator2
+              appium driver list --installed
+              echo "✅ Driver installed"
+            displayName: 'Install Appium Driver'
+
+          - bash: |
+              echo "🚀 Starting Appium Server..."
+              mkdir -p logs
+              
+              # Clean up any existing Appium processes
+              pkill -f appium || true
+              sleep 2
+              
+              # Start Appium
+              nohup appium --address 127.0.0.1 --port 4723 --session-override --log-level info > logs/appium.log 2>&1 &
+              APPIUM_PID=$!
+              echo "Appium PID: $APPIUM_PID"
+              echo "##vso[task.setvariable variable=APPIUM_PID]$APPIUM_PID"
+              
+              # Wait for Appium to be ready
+              for i in {1..30}; do
+                if curl -s http://127.0.0.1:4723/status > /dev/null 2>&1; then
+                  echo "✅ Appium server is ready"
+                  exit 0
+                fi
+                echo "Waiting... ($i/30)"
+                sleep 2
+              done
+              
+              echo "❌ Appium failed to start"
+              cat logs/appium.log
+              exit 1
+            displayName: 'Start Appium Server'
+
+          - bash: |
+              echo "📲 Installing Eptura Engage from Google Play Store..."
+              echo "======================================================="
+              
+              # Check if Google Play credentials are provided
+              if [ -z "$GOOGLE_PLAY_EMAIL" ] || [ -z "$GOOGLE_PLAY_PASSWORD" ]; then
+                echo "⚠️  GOOGLE_PLAY_EMAIL or GOOGLE_PLAY_PASSWORD not set"
+                echo ""
+                echo "To enable automatic Play Store installation:"
+                echo "1. Go to Azure Pipeline > Edit > Variables"
+                echo "2. Add secret variables:"
+                echo "   - GOOGLE_PLAY_EMAIL (your Google account email)"
+                echo "   - GOOGLE_PLAY_PASSWORD (your Google account password)"
+                echo ""
+                echo "Attempting alternative installation method..."
+                
+                # Try opening Play Store directly
+                adb shell am start -a android.intent.action.VIEW \
+                  -d "market://details?id=com.condecosoftware.condeco"
+                sleep 10
+                
+                echo "⚠️  Manual installation may be needed"
+                echo "If app is pre-installed on emulator, tests will continue"
+                
+              else
+                echo "✅ Google Play credentials found"
+                echo "Running automated Play Store installer..."
+                echo ""
+                
+                # Copy Python script to working directory
+                cp src/main/resources/install_from_playstore.py .
+                
+                # Run the installer
+                python3 install_from_playstore.py \
+                  "$GOOGLE_PLAY_EMAIL" \
+                  "$GOOGLE_PLAY_PASSWORD" \
+                  "Eptura Engage" || {
+                  echo "⚠️  Automated installation encountered issues"
+                  echo "Attempting direct Play Store link as fallback..."
+                  adb shell am start -a android.intent.action.VIEW \
+                    -d "market://details?id=com.condecosoftware.condeco"
+                  sleep 10
+                }
+              fi
+              
+              # Wait for installation to complete
+              echo ""
+              echo "⏳ Waiting for app installation..."
+              sleep 20
+              
+              # Verify installation
+              if adb shell pm list packages | grep -q "com.condecosoftware.condeco"; then
+                echo "✅ Eptura Engage app is installed!"
+                APP_INFO=$(adb shell dumpsys package com.condecosoftware.condeco | grep -E "versionName|versionCode" | head -2)
+                echo "App info:"
+                echo "$APP_INFO"
+              else
+                echo "❌ App installation failed!"
+                echo "Available packages containing 'condeco':"
+                adb shell pm list packages | grep -i condeco || echo "None found"
+                exit 1
+              fi
+            displayName: 'Install App from Play Store'
+            env:
+              GOOGLE_PLAY_EMAIL: $(GOOGLE_PLAY_EMAIL)
+              GOOGLE_PLAY_PASSWORD: $(GOOGLE_PLAY_PASSWORD)
+
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download Build Artifacts'
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'build-output'
+              downloadPath: '$(System.DefaultWorkingDirectory)'
+
+          - task: Maven@4
+            displayName: 'Run TestNG Tests'
+            inputs:
+              mavenPomFile: '$(mavenPOMFile)'
+              goals: 'test'
+              options: '-Dtestng.xml=testng.xml'
+              publishJUnitResults: true
+              testResultsFiles: '**/surefire-reports/TEST-*.xml'
+              testRunTitle: 'Eptura Engage Android Tests'
+              javaHomeOption: 'JDKVersion'
+              jdkVersionOption: '$(jdkVersion)'
+              mavenVersionOption: 'Default'
+              mavenOptions: '-Xmx3072m'
+            env:
+              USE_EXTERNAL_APPIUM: 'true'
+              APPIUM_SERVER_URL: 'http://127.0.0.1:4723'
+            continueOnError: true
+
+          - bash: |
+              echo "🧹 Cleanup: Stopping Appium Server..."
+              pkill -f appium || true
+            displayName: 'Stop Appium Server'
+            condition: always()
+
+          - bash: |
+              echo "🧹 Cleanup: Stopping Emulator..."
+              adb emu kill || true
+              pkill -f "emulator.*$(emulatorName)" || true
+              sleep 5
+            displayName: 'Stop Emulator'
+            condition: always()
+
+          - task: PublishTestResults@2
+            displayName: 'Publish Test Results'
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: '**/surefire-reports/TEST-*.xml'
+              mergeTestResults: true
+              failTaskOnFailedTests: false
+              testRunTitle: 'Eptura Android Tests'
+            condition: always()
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Screenshots'
+            inputs:
+              PathtoPublish: '$(screenshotsFolder)'
+              ArtifactName: 'test-screenshots'
+            condition: always()
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Extent Report'
+            inputs:
+              PathtoPublish: '$(extentReportFolder)/Extent-report.html'
+              ArtifactName: 'extent-report'
+            condition: always()
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Logs'
+            inputs:
+              PathtoPublish: '$(System.DefaultWorkingDirectory)/logs'
+              ArtifactName: 'appium-logs'
+            condition: always()
+
+          - bash: |
+              if [ -f emulator.log ]; then
+                mkdir -p logs
+                cp emulator.log logs/
+              fi
+            displayName: 'Collect Emulator Logs'
+            condition: always()
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Emulator Logs'
+            inputs:
+              PathtoPublish: '$(System.DefaultWorkingDirectory)/logs'
+              ArtifactName: 'emulator-logs'
+            condition: always()
+
+  - stage: Report
+    displayName: 'Test Reports'
+    dependsOn: Test
+    condition: always()
+    jobs:
+      - job: Summary
+        displayName: 'Test Summary'
+        steps:
+          - task: DownloadBuildArtifacts@1
+            inputs:
+              buildType: 'current'
+              downloadType: 'specific'
+              itemPattern: '**'
+              downloadPath: '$(System.DefaultWorkingDirectory)/artifacts'
+
+          - bash: |
+              echo "📊 Test Execution Summary"
+              echo "=========================="
+              if [ -d "artifacts/test-screenshots" ]; then
+                SCREENSHOT_COUNT=$(find artifacts/test-screenshots -type f -name "*.png" | wc -l)
+                echo "📸 Screenshots: $SCREENSHOT_COUNT"
+              fi
+              
+              if [ -f "artifacts/extent-report/Extent-report.html" ]; then
+                echo "✅ Extent Report: Available"
+              fi
+              
+              echo ""
+              echo "View artifacts in the 'Summary' tab of this pipeline run"
+            displayName: 'Display Summary'

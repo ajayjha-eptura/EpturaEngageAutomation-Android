@@ -31,16 +31,27 @@ class PlayStoreInstaller:
         options.no_reset = True
         options.full_reset = False
         
-        try:
-            self.driver = webdriver.Remote(
-                command_executor='http://127.0.0.1:4723',
-                options=options
-            )
-            print("✅ Appium driver initialized successfully")
-            return True
-        except Exception as e:
-            print(f"❌ Failed to initialize Appium driver: {e}")
-            return False
+        # Add retry logic
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                self.driver = webdriver.Remote(
+                    command_executor='http://127.0.0.1:4723',
+                    options=options
+                )
+                print("✅ Appium driver initialized successfully")
+                return True
+            except Exception as e:
+                retry_count += 1
+                print(f"⚠️  Attempt {retry_count}/{max_retries} failed: {e}")
+                if retry_count < max_retries:
+                    print("⏳ Retrying in 5 seconds...")
+                    time.sleep(5)
+                else:
+                    print(f"❌ Failed to initialize Appium driver after {max_retries} attempts")
+                    return False
     
     def wait_and_click(self, locator_type, locator_value, timeout=30):
         """Wait for element and click it"""
@@ -417,27 +428,41 @@ def main():
     print("🏪 Google Play Store Automated Installer")
     print("=" * 60)
     
-    # Get credentials from environment variables
-    email = os.environ.get('GOOGLE_EMAIL', '')
-    password = os.environ.get('GOOGLE_PASSWORD', '')
+    # Get credentials from command-line arguments or environment variables
+    if len(sys.argv) >= 3:
+        email = sys.argv[1]
+        password = sys.argv[2]
+        app_name = sys.argv[3] if len(sys.argv) >= 4 else "Eptura Engage"
+        print("📋 Using credentials from command-line arguments")
+    else:
+        email = os.environ.get('GOOGLE_EMAIL', '')
+        password = os.environ.get('GOOGLE_PASSWORD', '')
+        app_name = os.environ.get('APP_NAME', 'Eptura Engage')
+        print("📋 Using credentials from environment variables")
     
     if not email or not password:
-        print("❌ ERROR: Google credentials not found!")
-        print("Please set GOOGLE_EMAIL and GOOGLE_PASSWORD environment variables")
+        print("\n❌ ERROR: Google credentials not provided!")
+        print("\nUsage:")
+        print("  python3 install_from_playstore.py <email> <password> [app_name]")
+        print("\nOR set environment variables:")
+        print("  export GOOGLE_EMAIL='your@email.com'")
+        print("  export GOOGLE_PASSWORD='yourpassword'")
+        print("  export APP_NAME='Eptura Engage'")
         sys.exit(1)
     
-    print(f"📧 Using email: {email[:3]}***{email[-10:]}")
+    print(f"📧 Email: {email[:2]}***@***")
+    print(f"📱 App: {app_name}")
     
     installer = PlayStoreInstaller(email, password)
     
     try:
-        # Method 1: Direct deep link installation (faster)
+        # Method 1: Direct deep link installation (faster, doesn't require login)
         print("\n📍 Method 1: Trying direct deep link installation...")
         if installer.install_via_deep_link("com.condecosoftware.condeco"):
             print("\n✅ Installation successful!")
             return 0
         
-        # Method 2: Full automation with search
+        # Method 2: Full automation with search (requires login)
         print("\n📍 Method 2: Trying full Play Store automation...")
         if not installer.setup_driver():
             print("❌ Failed to setup Appium driver")
@@ -451,7 +476,7 @@ def main():
         installer.login_to_google_account()
         
         # Search and install app
-        if installer.search_and_install_app("Eptura Engage"):
+        if installer.search_and_install_app(app_name):
             print("\n✅ Installation successful!")
             return 0
         else:
@@ -460,6 +485,8 @@ def main():
             
     except Exception as e:
         print(f"\n❌ Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
     finally:
         installer.cleanup()
