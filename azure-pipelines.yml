@@ -104,14 +104,36 @@ stages:
           - bash: |
               echo "📱 Configuring Android SDK with Google Play support..."
               
+              # Set Android environment variables
               export ANDROID_HOME=$ANDROID_SDK_ROOT
               export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin
               
               echo "ANDROID_HOME: $ANDROID_HOME"
-              ls -la $ANDROID_HOME/
+              echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
               
-              # Accept all licenses
-              yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+              # Verify Android SDK exists
+              if [ ! -d "$ANDROID_HOME" ]; then
+                echo "❌ ANDROID_HOME directory not found: $ANDROID_HOME"
+                exit 1
+              fi
+              
+              echo "📋 Android SDK structure:"
+              ls -la $ANDROID_HOME/ || true
+              
+              # Verify cmdline-tools exists
+              if [ ! -d "$ANDROID_HOME/cmdline-tools/latest/bin" ]; then
+                echo "❌ cmdline-tools not found. Checking for alternative locations..."
+                find $ANDROID_HOME -name "sdkmanager" -type f 2>/dev/null || true
+                exit 1
+              fi
+              
+              # Accept all licenses first
+              echo "📝 Accepting Android SDK licenses..."
+              yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 || true
+              
+              # Update SDK manager
+              echo "🔄 Updating SDK manager..."
+              $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --update || true
               
               # Install SDK components with Google Play Store support
               echo "📦 Installing SDK components with Google Play Store..."
@@ -120,35 +142,53 @@ stages:
                 "platforms;android-30" \
                 "build-tools;30.0.3" \
                 "emulator" \
-                "system-images;android-30;google_apis_playstore;x86_64"
+                "system-images;android-30;google_apis_playstore;x86_64" || {
+                echo "❌ Failed to install SDK components"
+                echo "Attempting to list available packages:"
+                $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list || true
+                exit 1
+              }
               
-              echo "✅ SDK components installed"
+              echo "✅ SDK components installation completed"
               
-              # Verify ADB
-              adb version
+              # Wait for installation to complete and verify
+              sleep 5
               
-              # Set environment variables
-              echo "##vso[task.setvariable variable=ANDROID_HOME]$ANDROID_HOME"
-              echo "##vso[task.setvariable variable=PATH]$PATH"
-            displayName: 'Setup Android SDK with Google Play'
-
-          - bash: |
-              echo "📱 Creating Android Emulator with Google Play Store..."
+              # Verify system image was installed
+              echo "🔍 Verifying system image installation..."
+              echo "Checking path: $ANDROID_HOME/system-images/android-30/google_apis_playstore/x86_64"
               
-              export ANDROID_HOME=$ANDROID_SDK_ROOT
-              export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin
-              
-              # Verify system image exists
-              if [ ! -d "$ANDROID_HOME/system-images/android-30/google_apis_playstore/x86_64" ]; then
-                echo "❌ Google Play system image not found!"
-                ls -la $ANDROID_HOME/system-images/
+              if [ -d "$ANDROID_HOME/system-images/android-30/google_apis_playstore/x86_64" ]; then
+                echo "✅ Google Play system image found!"
+                ls -la "$ANDROID_HOME/system-images/android-30/google_apis_playstore/x86_64"
+              else
+                echo "❌ System image not found after installation!"
+                echo ""
+                echo "Contents of system-images directory:"
+                if [ -d "$ANDROID_HOME/system-images" ]; then
+                  find $ANDROID_HOME/system-images -type d -maxdepth 3
+                else
+                  echo "⚠️  system-images directory does not exist at: $ANDROID_HOME/system-images"
+                fi
+                echo ""
+                echo "📋 List of installed packages:"
+                $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list_installed
                 exit 1
               fi
               
-              echo "✅ Google Play system image found"
+              # Verify ADB
+              echo "🔧 Verifying ADB..."
+              adb version
+              
+              # List all installed system images
+              echo "📋 Installed system images:"
+              $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list_installed | grep system-images || echo "No system images found in installed list"
+              
+              echo ""
+              echo "📱 Creating Android Emulator with Google Play Store..."
               
               # Delete existing emulator if present
-              $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager delete avd -n $(emulatorName) || true
+              $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager delete avd -n $(emulatorName) 2>/dev/null || true
               
               # Create new emulator with Google Play
               echo "Creating emulator with Google Play Store support..."
@@ -157,13 +197,23 @@ stages:
                 --name "$(emulatorName)" \
                 --package "system-images;android-30;google_apis_playstore;x86_64" \
                 --device "pixel_4" \
-                --abi x86_64
+                --abi x86_64 || {
+                echo "❌ Failed to create emulator"
+                echo "Available packages:"
+                $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager list target
+                exit 1
+              }
               
               # Verify emulator was created
+              echo "🔍 Verifying emulator creation..."
+              $ANDROID_HOME/emulator/emulator -list-avds
+              
               if $ANDROID_HOME/emulator/emulator -list-avds | grep -q "$(emulatorName)"; then
                 echo "✅ Emulator '$(emulatorName)' created successfully"
               else
                 echo "❌ Failed to create emulator"
+                echo "Available AVDs:"
+                $ANDROID_HOME/emulator/emulator -list-avds
                 exit 1
               fi
               
@@ -194,7 +244,7 @@ stages:
               until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; do
                 if [ $elapsed -ge $timeout ]; then
                   echo "❌ Boot timeout after $timeout seconds"
-                  echo "=== Emulator Log ==="
+                  echo "=== Emulator Log (last 100 lines) ==="
                   tail -100 emulator.log
                   exit 1
                 fi
@@ -207,8 +257,10 @@ stages:
               sleep 20
               
               # Verify emulator is ready
+              echo "📱 Emulator status:"
               adb devices -l
               echo "Android version: $(adb shell getprop ro.build.version.release)"
+              echo "API Level: $(adb shell getprop ro.build.version.sdk)"
               
               # Check for Google Play Store
               if adb shell pm list packages | grep -q "com.android.vending"; then
@@ -221,7 +273,10 @@ stages:
               EMULATOR_SERIAL=$(adb devices | grep "emulator" | head -1 | awk '{print $1}')
               echo "Emulator Serial: $EMULATOR_SERIAL"
               echo "##vso[task.setvariable variable=EMULATOR_SERIAL]$EMULATOR_SERIAL"
-            displayName: 'Create and Start Emulator with Google Play'
+              
+              echo ""
+              echo "✅ Android emulator setup complete!"
+            displayName: 'Setup Android SDK and Create Emulator with Google Play'
 
           - task: Npm@1
             displayName: 'Install Appium'
