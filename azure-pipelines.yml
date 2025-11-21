@@ -22,7 +22,7 @@ pr:
 # Pipeline variables
 variables:
   mavenPOMFile: 'pom.xml'
-  jdkVersion: '11'
+  jdkVersion: '17'
   appiumVersion: '3.0.0'
   androidSdkVersion: '30'
   testResultsFolder: '$(System.DefaultWorkingDirectory)/target/surefire-reports'
@@ -42,9 +42,9 @@ stages:
         displayName: 'Build Maven Project'
         steps:
           - task: JavaToolInstaller@0
-            displayName: 'Install Java JDK 11'
+            displayName: 'Install Java JDK 17'
             inputs:
-              versionSpec: '11'
+              versionSpec: '17'
               jdkArchitectureOption: 'x64'
               jdkSourceOption: 'PreInstalled'
 
@@ -76,9 +76,9 @@ stages:
         timeoutInMinutes: 120
         steps:
           - task: JavaToolInstaller@0
-            displayName: 'Install Java JDK 11'
+            displayName: 'Install Java JDK 17'
             inputs:
-              versionSpec: '11'
+              versionSpec: '17'
               jdkArchitectureOption: 'x64'
               jdkSourceOption: 'PreInstalled'
 
