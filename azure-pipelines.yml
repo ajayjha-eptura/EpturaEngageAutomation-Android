@@ -131,17 +131,37 @@ stages:
                 exit 1
               fi
               
-              # Accept all licenses first
+              # Accept all licenses - use a more robust method
               echo "📝 Accepting Android SDK licenses..."
-              yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 || true
+              # Create licenses directory if it doesn't exist
+              mkdir -p "$ANDROID_HOME/licenses"
+              
+              # Accept all known Android SDK licenses by creating license files
+              echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
+              echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+              echo "d975f751698a77b662f1254ddbeed3901e976f5a" > "$ANDROID_HOME/licenses/intel-android-extra-license"
+              echo "33b6a2b64607f11b759f320ef9dff4ae5c47d97a" > "$ANDROID_HOME/licenses/google-gdk-license"
+              echo "e9acab5b5fbb560a72cfaecce8946896ff6aab9d" > "$ANDROID_HOME/licenses/mips-android-sysimage-license"
+              echo "d56a98520377fecf01c9e79e689e9ba188a4558e" > "$ANDROID_HOME/licenses/android-googletv-license"
+              echo "667f5ef1d0d6dbb3c1bb1dbe94f0c0c66f8c3ee5" > "$ANDROID_HOME/licenses/android-googlexr-license"
+              echo "e6b7c2ab7fa2298c15165e9583d0acf0b04a2232" > "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license"
+              
+              # Additionally run the interactive license acceptance with yes, but with timeout to prevent hanging
+              echo "Running interactive license acceptance (with timeout)..."
+              timeout 30 bash -c "yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=$ANDROID_HOME" 2>&1 || echo "License acceptance completed or timed out (this is expected)"
+              
+              # Verify licenses directory
+              echo "📋 Licenses directory contents:"
+              ls -la "$ANDROID_HOME/licenses/" || echo "Licenses directory not found"
               
               # Update SDK manager
               echo "🔄 Updating SDK manager..."
-              $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --update || true
+              $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --update --sdk_root=$ANDROID_HOME || true
               
               # Install SDK components with Google Play Store support
               echo "📦 Installing SDK components with Google Play Store..."
               $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+                --sdk_root=$ANDROID_HOME \
                 "platform-tools" \
                 "platforms;android-30" \
                 "build-tools;30.0.3" \
@@ -149,7 +169,7 @@ stages:
                 "system-images;android-30;google_apis_playstore;x86_64" || {
                 echo "❌ Failed to install SDK components"
                 echo "Attempting to list available packages:"
-                $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list || true
+                $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list --sdk_root=$ANDROID_HOME 2>&1 | head -50 || true
                 exit 1
               }
               
@@ -176,7 +196,7 @@ stages:
                 fi
                 echo ""
                 echo "📋 List of installed packages:"
-                $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list_installed
+                $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list_installed --sdk_root=$ANDROID_HOME
                 exit 1
               fi
               
@@ -186,7 +206,7 @@ stages:
               
               # List all installed system images
               echo "📋 Installed system images:"
-              $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list_installed | grep system-images || echo "No system images found in installed list"
+              $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list_installed --sdk_root=$ANDROID_HOME | grep system-images || echo "No system images found in installed list"
               
               echo ""
               echo "📱 Creating Android Emulator with Google Play Store..."
