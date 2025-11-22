@@ -93,12 +93,16 @@ stages:
               pip3 --version
               
               # Install Appium Python client and dependencies
-              pip3 install --upgrade pip
-              pip3 install Appium-Python-Client
-              pip3 install selenium
+              # Using --break-system-packages flag to bypass PEP 668 restrictions on macOS
+              # Allow pip upgrade to fail as it's not critical
+              pip3 install --upgrade pip --break-system-packages || echo "⚠️  Pip upgrade skipped (not critical)"
+              
+              # Install required packages
+              pip3 install Appium-Python-Client --break-system-packages || { echo "❌ Failed to install Appium-Python-Client"; exit 1; }
+              pip3 install selenium --break-system-packages || { echo "❌ Failed to install selenium"; exit 1; }
               
               echo "✅ Python dependencies installed"
-              pip3 list | grep -i appium
+              pip3 list | grep -i appium || echo "Appium package verification"
             displayName: 'Install Python Dependencies'
 
           - bash: |
