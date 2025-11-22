@@ -7,6 +7,7 @@ Installs Eptura Engage app from Play Store using provided credentials
 import os
 import sys
 import time
+import subprocess
 from appium import webdriver
 from appium.options.android import UiAutomator2Options
 from appium.webdriver.common.appiumby import AppiumBy
@@ -19,10 +20,70 @@ class PlayStoreInstaller:
         self.email = email
         self.password = password
         self.driver = None
+    
+    def check_emulator_ready(self):
+        """Verify emulator is fully booted and services are ready"""
+        print("🔍 Verifying emulator readiness...")
+        
+        try:
+            # Check if device is connected
+            result = subprocess.run(['adb', 'devices'], capture_output=True, text=True, timeout=10)
+            if 'emulator' not in result.stdout:
+                print("❌ No emulator device found")
+                return False
+            
+            # Check boot completed
+            result = subprocess.run(['adb', 'shell', 'getprop', 'sys.boot_completed'], 
+                                  capture_output=True, text=True, timeout=10)
+            if '1' not in result.stdout:
+                print("❌ Emulator boot not completed")
+                return False
+            
+            # Check package manager service
+            result = subprocess.run(['adb', 'shell', 'pm', 'list', 'packages'], 
+                                  capture_output=True, text=True, timeout=10)
+            if result.returncode != 0 or 'Can\'t find service' in result.stderr:
+                print("❌ Package manager service not ready")
+                return False
+            
+            print("✅ Emulator is ready")
+            return True
+            
+        except subprocess.TimeoutExpired:
+            print("❌ Timeout checking emulator status")
+            return False
+        except Exception as e:
+            print(f"❌ Error checking emulator: {e}")
+            return False
+    
+    def wait_for_emulator_ready(self, max_wait=120):
+        """Wait for emulator to be fully ready with all services"""
+        print(f"⏳ Waiting for emulator to be fully ready (max {max_wait}s)...")
+        
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            if self.check_emulator_ready():
+                # Additional wait for stability
+                print("⏳ Waiting 10 seconds for system stability...")
+                time.sleep(10)
+                return True
+            
+            elapsed = int(time.time() - start_time)
+            if elapsed % 10 == 0:
+                print(f"  Still waiting... ({elapsed}/{max_wait}s)")
+            
+            time.sleep(5)
+        
+        print(f"❌ Emulator not ready after {max_wait} seconds")
+        return False
         
     def setup_driver(self):
         """Initialize Appium driver for Play Store automation"""
         print("🔧 Setting up Appium driver for Play Store...")
+        
+        # First ensure emulator is ready
+        if not self.wait_for_emulator_ready():
+            print("⚠️  Proceeding anyway, but may encounter issues...")
         
         options = UiAutomator2Options()
         options.platform_name = "Android"
@@ -30,25 +91,31 @@ class PlayStoreInstaller:
         options.device_name = "Android Emulator"
         options.no_reset = True
         options.full_reset = False
+        options.new_command_timeout = 300
+        options.adb_exec_timeout = 60000
         
-        # Add retry logic
+        # Add retry logic with longer delays
         max_retries = 3
         retry_count = 0
         
         while retry_count < max_retries:
             try:
+                print(f"  Attempt {retry_count + 1}/{max_retries}...")
                 self.driver = webdriver.Remote(
                     command_executor='http://127.0.0.1:4723',
                     options=options
                 )
                 print("✅ Appium driver initialized successfully")
+                # Give it a moment to settle
+                time.sleep(3)
                 return True
             except Exception as e:
                 retry_count += 1
                 print(f"⚠️  Attempt {retry_count}/{max_retries} failed: {e}")
                 if retry_count < max_retries:
-                    print("⏳ Retrying in 5 seconds...")
-                    time.sleep(5)
+                    wait_time = 10 * retry_count  # Increasing backoff
+                    print(f"⏳ Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
                 else:
                     print(f"❌ Failed to initialize Appium driver after {max_retries} attempts")
                     return False
