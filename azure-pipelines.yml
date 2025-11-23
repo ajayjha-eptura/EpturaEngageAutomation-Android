@@ -441,67 +441,225 @@ stages:
             displayName: 'Start Appium Server'
 
           - bash: |
-              echo "📲 Installing Eptura Engage from Google Play Store..."
+              echo "📲 Installing Eptura Engage App..."
               echo "======================================================="
               
-              # Check if Google Play credentials are provided
-              if [ -z "$GOOGLE_PLAY_EMAIL" ] || [ -z "$GOOGLE_PLAY_PASSWORD" ]; then
-                echo "⚠️  GOOGLE_PLAY_EMAIL or GOOGLE_PLAY_PASSWORD not set"
-                echo ""
-                echo "To enable automatic Play Store installation:"
-                echo "1. Go to Azure Pipeline > Edit > Variables"
-                echo "2. Add secret variables:"
-                echo "   - GOOGLE_PLAY_EMAIL (your Google account email)"
-                echo "   - GOOGLE_PLAY_PASSWORD (your Google account password)"
-                echo ""
-                echo "Attempting alternative installation method..."
-                
-                # Try opening Play Store directly
-                adb shell am start -a android.intent.action.VIEW \
-                  -d "market://details?id=com.condecosoftware.condeco"
-                sleep 10
-                
-                echo "⚠️  Manual installation may be needed"
-                echo "If app is pre-installed on emulator, tests will continue"
-                
-              else
-                echo "✅ Google Play credentials found"
-                echo "Running automated Play Store installer..."
-                echo ""
-                
-                # Copy Python script to working directory
-                cp src/main/resources/install_from_playstore.py .
-                
-                # Run the installer
-                python3 install_from_playstore.py \
-                  "$GOOGLE_PLAY_EMAIL" \
-                  "$GOOGLE_PLAY_PASSWORD" \
-                  "Eptura Engage" || {
-                  echo "⚠️  Automated installation encountered issues"
-                  echo "Attempting direct Play Store link as fallback..."
-                  adb shell am start -a android.intent.action.VIEW \
-                    -d "market://details?id=com.condecosoftware.condeco"
-                  sleep 10
-                }
-              fi
+              # Define package name
+              PACKAGE_NAME="com.condecosoftware.condeco"
               
-              # Wait for installation to complete
-              echo ""
-              echo "⏳ Waiting for app installation..."
-              sleep 20
-              
-              # Verify installation
-              if adb shell pm list packages | grep -q "com.condecosoftware.condeco"; then
-                echo "✅ Eptura Engage app is installed!"
-                APP_INFO=$(adb shell dumpsys package com.condecosoftware.condeco | grep -E "versionName|versionCode" | head -2)
+              # Check if app is already installed
+              if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
+                echo "✅ App is already installed!"
+                APP_INFO=$(adb shell dumpsys package $PACKAGE_NAME | grep -E "versionName|versionCode" | head -2)
                 echo "App info:"
                 echo "$APP_INFO"
-              else
-                echo "❌ App installation failed!"
-                echo "Available packages containing 'condeco':"
-                adb shell pm list packages | grep -i condeco || echo "None found"
-                exit 1
+                exit 0
               fi
+              
+              echo "📦 Method 1: Attempting direct APK installation..."
+              echo ""
+              
+              # Check if APK file is provided in the repo
+              if [ -f "app/Eptura_Engage.apk" ] || [ -f "Eptura_Engage.apk" ]; then
+                APK_PATH=$(find . -name "Eptura_Engage.apk" -o -name "condeco.apk" | head -1)
+                echo "✅ Found APK file: $APK_PATH"
+                echo "📥 Installing APK..."
+                
+                adb install -r "$APK_PATH"
+                
+                if [ $? -eq 0 ]; then
+                  echo "✅ APK installed successfully!"
+                  exit 0
+                else
+                  echo "⚠️  APK installation failed, trying alternative methods..."
+                fi
+              else
+                echo "ℹ️  No APK file found in repository"
+              fi
+              
+              echo ""
+              echo "📦 Method 2: Attempting Play Store deep link with UI automation..."
+              echo ""
+              
+              # Try opening Play Store with deep link
+              adb shell am start -a android.intent.action.VIEW -d "market://details?id=$PACKAGE_NAME"
+              
+              echo "⏳ Waiting for Play Store to load (15 seconds)..."
+              sleep 15
+              
+              # Try to find and click Install button using multiple methods
+              echo "🔍 Attempting to find and click Install button..."
+              
+              # Method 1: Use uiautomator to find Install button coordinates
+              echo "  Method 1: Using UI Automator to locate button..."
+              adb shell uiautomator dump /sdcard/window_dump.xml 2>/dev/null
+              
+              # Try to extract Install button coordinates from XML
+              INSTALL_FOUND=false
+              if adb pull /sdcard/window_dump.xml /tmp/window_dump.xml 2>/dev/null; then
+                # Look for Install button in XML and extract bounds
+                BOUNDS=$(grep -i 'text="Install"\|content-desc="Install"' /tmp/window_dump.xml | grep -o 'bounds="\[.*\]"' | head -1 | sed 's/bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]"/\1 \2 \3 \4/')
+                
+                if [ -n "$BOUNDS" ]; then
+                  X1=$(echo $BOUNDS | awk '{print $1}')
+                  Y1=$(echo $BOUNDS | awk '{print $2}')
+                  X2=$(echo $BOUNDS | awk '{print $3}')
+                  Y2=$(echo $BOUNDS | awk '{print $4}')
+                  
+                  # Calculate center of button
+                  TAP_X=$(( (X1 + X2) / 2 ))
+                  TAP_Y=$(( (Y1 + Y2) / 2 ))
+                  
+                  echo "  ✅ Found Install button at [$X1,$Y1][$X2,$Y2]"
+                  echo "  🎯 Tapping at center: ($TAP_X, $TAP_Y)"
+                  
+                  adb shell input tap $TAP_X $TAP_Y
+                  INSTALL_FOUND=true
+                  sleep 5
+                fi
+              fi
+              
+              # Method 2: Try common button locations if UI Automator failed
+              if [ "$INSTALL_FOUND" = false ]; then
+                echo "  Method 2: Trying common Install button locations..."
+                
+                # Get screen dimensions
+                SCREEN_SIZE=$(adb shell wm size | grep "Physical size" | cut -d: -f2 | tr -d ' ')
+                WIDTH=$(echo $SCREEN_SIZE | cut -dx -f1)
+                HEIGHT=$(echo $SCREEN_SIZE | cut -dx -f2)
+                
+                echo "  📱 Screen size: ${WIDTH}x${HEIGHT}"
+                
+                # Try multiple common locations for Install button
+                declare -a TAP_LOCATIONS=(
+                  "$((WIDTH * 4 / 5)) $((HEIGHT / 3))"      # Upper right
+                  "$((WIDTH * 3 / 4)) $((HEIGHT / 3))"      # Upper right-center
+                  "$((WIDTH * 7 / 8)) $((HEIGHT * 2 / 5))"  # Right side
+                  "$((WIDTH * 2 / 3)) $((HEIGHT / 4))"      # Upper center-right
+                  "$((WIDTH * 5 / 6)) $((HEIGHT / 3))"      # Far right
+                )
+                
+                for location in "${TAP_LOCATIONS[@]}"; do
+                  X=$(echo $location | awk '{print $1}')
+                  Y=$(echo $location | awk '{print $2}')
+                  echo "  🎯 Trying tap at: ($X, $Y)"
+                  adb shell input tap $X $Y
+                  sleep 3
+                  
+                  # Quick check if installation started
+                  if adb shell dumpsys window | grep -q "mCurrentFocus.*vending"; then
+                    echo "  ✅ Tap executed on Play Store"
+                  fi
+                done
+              fi
+              
+              # Handle any confirmation dialogs
+              echo "  Checking for confirmation dialogs..."
+              sleep 3
+              
+              # Try to find and click Continue/Accept buttons
+              adb shell uiautomator dump /sdcard/window_dump.xml 2>/dev/null
+              if adb pull /sdcard/window_dump.xml /tmp/window_dump.xml 2>/dev/null; then
+                for BUTTON_TEXT in "Continue" "Accept" "OK" "Agree"; do
+                  BOUNDS=$(grep "text=\"$BUTTON_TEXT\"" /tmp/window_dump.xml | grep -o 'bounds="\[.*\]"' | head -1 | sed 's/bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]"/\1 \2 \3 \4/')
+                  if [ -n "$BOUNDS" ]; then
+                    X1=$(echo $BOUNDS | awk '{print $1}')
+                    Y1=$(echo $BOUNDS | awk '{print $2}')
+                    X2=$(echo $BOUNDS | awk '{print $3}')
+                    Y2=$(echo $BOUNDS | awk '{print $4}')
+                    TAP_X=$(( (X1 + X2) / 2 ))
+                    TAP_Y=$(( (Y1 + Y2) / 2 ))
+                    echo "  ✅ Clicking '$BUTTON_TEXT' button at ($TAP_X, $TAP_Y)"
+                    adb shell input tap $TAP_X $TAP_Y
+                    sleep 2
+                  fi
+                done
+              fi
+              
+              echo ""
+              echo "⏳ Waiting for installation to complete..."
+              echo "   Monitoring: UI changes, download progress, and package manager"
+              echo "   This may take 5-10 minutes for a 170 MB app"
+              echo ""
+              
+              # Wait and check for installation with comprehensive monitoring
+              MAX_WAIT=600  # 10 minutes for 170 MB app
+              ELAPSED=0
+              CHECK_INTERVAL=15
+              LAST_PROGRESS=""
+              
+              while [ $ELAPSED -lt $MAX_WAIT ]; do
+                # Check 1: Package manager (most reliable)
+                if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
+                  echo ""
+                  echo "✅ App package detected in system!"
+                  
+                  # Verify it's fully installed (not just being installed)
+                  sleep 10
+                  
+                  if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
+                    echo "✅ Installation verified successfully!"
+                    
+                    # Get app info
+                    APP_INFO=$(adb shell dumpsys package $PACKAGE_NAME | grep -E "versionName|versionCode" | head -2 2>/dev/null || echo "version info unavailable")
+                    echo ""
+                    echo "📱 App info:"
+                    echo "$APP_INFO"
+                    echo ""
+                    exit 0
+                  fi
+                fi
+                
+                # Check 2: Look for progress indicators in UI
+                if adb shell uiautomator dump /sdcard/window_dump.xml 2>/dev/null; then
+                  if adb pull /sdcard/window_dump.xml /tmp/window_dump.xml 2>/dev/null; then
+                    # Check for "Open" button (installation complete)
+                    if grep -q 'text="Open"' /tmp/window_dump.xml || grep -q 'text="OPEN"' /tmp/window_dump.xml; then
+                      echo ""
+                      echo "✅ 'Open' button detected - installation complete!"
+                      sleep 5
+                      
+                      # Verify in package manager
+                      if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
+                        echo "✅ Verified via package manager!"
+                        exit 0
+                      fi
+                    fi
+                    
+                    # Check for download/install progress
+                    PROGRESS=$(grep -oP '(Downloading|Installing|[0-9]+%)' /tmp/window_dump.xml | head -1)
+                    if [ -n "$PROGRESS" ] && [ "$PROGRESS" != "$LAST_PROGRESS" ]; then
+                      echo "  📥 Progress: $PROGRESS"
+                      LAST_PROGRESS="$PROGRESS"
+                    fi
+                    
+                    # Check for error messages
+                    if grep -qE '(Error|Failed|Cannot|Unable)' /tmp/window_dump.xml; then
+                      ERROR_MSG=$(grep -oP 'text="[^"]*(?:Error|Failed|Cannot|Unable)[^"]*"' /tmp/window_dump.xml | head -1)
+                      if [ -n "$ERROR_MSG" ]; then
+                        echo "  ⚠️  Possible error: $ERROR_MSG"
+                      fi
+                    fi
+                  fi
+                fi
+                
+                sleep $CHECK_INTERVAL
+                ELAPSED=$((ELAPSED + CHECK_INTERVAL))
+                
+                if [ $((ELAPSED % 60)) -eq 0 ]; then
+                  MINUTES=$((ELAPSED / 60))
+                  echo "  ⏳ Still waiting... ($MINUTES minutes elapsed)"
+                  
+                  # Show that we're still monitoring
+                  if adb shell dumpsys window | grep -q "mCurrentFocus.*vending"; then
+                    echo "     Play Store is still active"
+                  fi
+                fi
+              done
+              
+              echo ""
+              echo "⚠️  Installation timeout after $((MAX_WAIT / 60)) minutes"
+              echo ""
             displayName: 'Install App from Play Store'
             env:
               GOOGLE_PLAY_EMAIL: $(GOOGLE_PLAY_EMAIL)

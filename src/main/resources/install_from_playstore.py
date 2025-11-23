@@ -93,6 +93,9 @@ class PlayStoreInstaller:
         options.full_reset = False
         options.new_command_timeout = 300
         options.adb_exec_timeout = 60000
+        # Increase uiautomator2 server launch timeout to avoid initialization errors
+        options.uiautomator2_server_launch_timeout = 60000
+        options.uiautomator2_server_install_timeout = 60000
         
         # Add retry logic with longer delays
         max_retries = 3
@@ -113,7 +116,7 @@ class PlayStoreInstaller:
                 retry_count += 1
                 print(f"⚠️  Attempt {retry_count}/{max_retries} failed: {e}")
                 if retry_count < max_retries:
-                    wait_time = 10 * retry_count  # Increasing backoff
+                    wait_time = 15 * retry_count  # Increasing backoff
                     print(f"⏳ Retrying in {wait_time} seconds...")
                     time.sleep(wait_time)
                 else:
@@ -317,89 +320,179 @@ class PlayStoreInstaller:
             print("🔎 Opening search...")
             search_selectors = [
                 'new UiSelector().resourceId("com.android.vending:id/search_bar_hint")',
+                'new UiSelector().resourceId("com.android.vending:id/search_box_idle_text")',
                 'new UiSelector().descriptionContains("Search")',
-                'new UiSelector().textContains("Search")'
+                'new UiSelector().textContains("Search")',
+                'new UiSelector().className("android.widget.EditText")'
             ]
             
+            search_opened = False
             for selector in search_selectors:
                 try:
                     search_icon = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
                     search_icon.click()
-                    time.sleep(2)
+                    time.sleep(3)
+                    search_opened = True
+                    print(f"✅ Search opened using selector: {selector[:50]}...")
                     break
                 except:
                     continue
+            
+            if not search_opened:
+                print("⚠️  Could not open search, trying to proceed anyway")
             
             # Enter app name in search field
             print(f"⌨️  Typing '{app_name}'...")
             search_field_selectors = [
                 'new UiSelector().resourceId("com.android.vending:id/search_bar_text_input")',
-                'new UiSelector().className("android.widget.EditText")'
+                'new UiSelector().resourceId("com.android.vending:id/search_box_text_input")',
+                'new UiSelector().className("android.widget.EditText")',
+                'new UiSelector().focused(true)'
             ]
             
+            text_entered = False
             for selector in search_field_selectors:
                 try:
                     search_field = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
                     search_field.clear()
+                    time.sleep(1)
                     search_field.send_keys(app_name)
+                    text_entered = True
+                    print(f"✅ Text entered successfully")
                     time.sleep(2)
                     break
-                except:
+                except Exception as e:
                     continue
             
-            # Press Enter or click first result
-            self.driver.press_keycode(66)  # KEYCODE_ENTER
-            time.sleep(3)
+            if not text_entered:
+                print("❌ Could not enter search text")
+                return False
+            
+            # Press Enter or click search button
+            try:
+                self.driver.press_keycode(66)  # KEYCODE_ENTER
+                print("✅ Pressed Enter key")
+                time.sleep(5)  # Wait for search results
+            except:
+                print("⚠️  Could not press Enter key")
             
             # Click on the app from search results
             print("📱 Selecting app from results...")
-            try:
-                app_item = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
-                                                   f'new UiSelector().textContains("{app_name}")')
-                app_item.click()
-                time.sleep(3)
-            except:
-                print("⚠️  Could not find app in search results")
+            app_clicked = False
             
-            # Click Install button
-            print("📲 Clicking Install button...")
-            install_texts = ["Install", "INSTALL", "Update", "UPDATE", "Open", "OPEN"]
+            # Try multiple ways to find and click the app
+            app_selectors = [
+                f'new UiSelector().textContains("{app_name}")',
+                f'new UiSelector().descriptionContains("{app_name}")',
+                'new UiSelector().textContains("Eptura")',
+                'new UiSelector().textContains("Condeco")',
+                'new UiSelector().resourceId("com.android.vending:id/li_title")'
+            ]
             
-            for text in install_texts:
+            for selector in app_selectors:
                 try:
-                    install_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
-                                                          f'new UiSelector().textContains("{text}")')
-                    button_text = install_btn.text
-                    
-                    if button_text in ["Open", "OPEN"]:
-                        print("✅ App is already installed!")
-                        return True
-                    
-                    install_btn.click()
-                    print(f"✅ Clicked {button_text} button")
+                    app_item = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+                    app_item.click()
+                    print(f"✅ App clicked using selector: {selector[:50]}...")
+                    time.sleep(5)
+                    app_clicked = True
                     break
                 except:
                     continue
             
-            # Wait for installation to complete
+            if not app_clicked:
+                print("⚠️  Could not find app in search results, trying to continue anyway")
+            
+            # Click Install button - try multiple times with different selectors
+            print("📲 Looking for Install button...")
+            install_clicked = False
+            install_texts = ["Install", "INSTALL", "Update", "UPDATE", "Open", "OPEN", "Get"]
+            
+            for attempt in range(3):  # Try 3 times
+                for text in install_texts:
+                    try:
+                        install_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
+                                                              f'new UiSelector().textContains("{text}").className("android.widget.Button")')
+                        button_text = install_btn.text
+                        
+                        if button_text.upper() in ["OPEN"]:
+                            print("✅ App is already installed!")
+                            return True
+                        
+                        install_btn.click()
+                        print(f"✅ Clicked '{button_text}' button")
+                        install_clicked = True
+                        time.sleep(3)
+                        
+                        # Handle any confirmation dialogs
+                        try:
+                            continue_selectors = [
+                                'new UiSelector().textContains("Continue")',
+                                'new UiSelector().textContains("Accept")',
+                                'new UiSelector().textContains("OK")'
+                            ]
+                            for selector in continue_selectors:
+                                try:
+                                    confirm_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+                                    confirm_btn.click()
+                                    print("✅ Confirmed installation")
+                                    time.sleep(2)
+                                except:
+                                    pass
+                        except:
+                            pass
+                        
+                        break
+                    except:
+                        continue
+                
+                if install_clicked:
+                    break
+                    
+                if attempt < 2:
+                    print(f"⏳ Retrying... (attempt {attempt + 2}/3)")
+                    time.sleep(3)
+            
+            if not install_clicked:
+                print("❌ Could not find or click Install button")
+                return False
+            
+            # Wait for installation to complete with better verification
             print("⏳ Waiting for installation to complete...")
+            print("   Checking both UI and package manager...")
             max_wait = 300  # 5 minutes
             wait_time = 0
+            check_interval = 10
             
             while wait_time < max_wait:
+                # Method 1: Check for "Open" button in UI
                 try:
-                    # Check if "Open" button appears (installation complete)
                     open_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
-                                                       'new UiSelector().textContains("Open")')
-                    print("✅ Installation completed successfully!")
+                                                       'new UiSelector().text("Open").className("android.widget.Button")')
+                    print("✅ Installation completed successfully (Open button found)!")
                     return True
                 except:
-                    time.sleep(10)
-                    wait_time += 10
+                    pass
+                
+                # Method 2: Check package manager directly
+                try:
+                    import subprocess
+                    result = subprocess.run(['adb', 'shell', 'pm', 'list', 'packages', 'com.condecosoftware.condeco'],
+                                          capture_output=True, text=True, timeout=5)
+                    if 'com.condecosoftware.condeco' in result.stdout:
+                        print("✅ Installation completed successfully (package detected)!")
+                        return True
+                except:
+                    pass
+                
+                time.sleep(check_interval)
+                wait_time += check_interval
+                
+                if wait_time % 30 == 0:
                     print(f"⏳ Still installing... ({wait_time}/{max_wait} seconds)")
             
-            print("⚠️  Installation timeout, but app may still be installing")
-            return True
+            print("❌ Installation timeout - app was not installed")
+            return False
             
         except Exception as e:
             print(f"❌ Error during app installation: {e}")
@@ -411,72 +504,162 @@ class PlayStoreInstaller:
         
         try:
             # Open Play Store app page directly
-            os.system(f'adb shell am start -a android.intent.action.VIEW -d "market://details?id={package_name}"')
-            time.sleep(5)
+            import subprocess
+            subprocess.run(['adb', 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW',
+                          '-d', f'market://details?id={package_name}'], timeout=10)
+            time.sleep(8)
             
             if not self.driver:
-                self.setup_driver()
+                if not self.setup_driver():
+                    print("❌ Could not setup driver")
+                    return False
             
             # Wait for page to load
-            time.sleep(3)
+            print("⏳ Waiting for Play Store page to load...")
+            time.sleep(5)
             
-            # Click Install button
+            # Click Install button - try multiple times
             print("📲 Looking for Install button...")
-            install_texts = ["Install", "INSTALL", "Update", "UPDATE", "Open", "OPEN"]
+            install_clicked = False
+            install_texts = ["Install", "INSTALL", "Update", "UPDATE", "Open", "OPEN", "Get"]
             
-            for text in install_texts:
-                try:
-                    install_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
-                                                          f'new UiSelector().textContains("{text}")')
-                    button_text = install_btn.text
-                    
-                    if button_text in ["Open", "OPEN"]:
-                        print("✅ App is already installed!")
-                        return True
-                    
-                    install_btn.click()
-                    print(f"✅ Clicked {button_text} button")
-                    time.sleep(3)
-                    
-                    # Handle any confirmation dialogs
+            for attempt in range(5):  # Try 5 times
+                for text in install_texts:
                     try:
-                        continue_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
-                                                               'new UiSelector().textContains("Continue")')
-                        continue_btn.click()
+                        # Try with multiple selector strategies
+                        selectors = [
+                            f'new UiSelector().text("{text}").className("android.widget.Button")',
+                            f'new UiSelector().textContains("{text}")',
+                            f'new UiSelector().description("{text}")'
+                        ]
+                        
+                        for selector in selectors:
+                            try:
+                                install_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+                                button_text = install_btn.text if hasattr(install_btn, 'text') else text
+                                
+                                if button_text.upper() in ["OPEN"]:
+                                    print("✅ App is already installed!")
+                                    return True
+                                
+                                # Get button location and click
+                                install_btn.click()
+                                print(f"✅ Clicked '{button_text}' button (attempt {attempt + 1})")
+                                install_clicked = True
+                                time.sleep(3)
+                                
+                                # Handle any confirmation dialogs
+                                confirm_texts = ["Continue", "Accept", "OK", "Agree"]
+                                for confirm_text in confirm_texts:
+                                    try:
+                                        confirm_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
+                                                                              f'new UiSelector().textContains("{confirm_text}")')
+                                        confirm_btn.click()
+                                        print(f"✅ Clicked '{confirm_text}'")
+                                        time.sleep(2)
+                                    except:
+                                        pass
+                                
+                                break
+                            except:
+                                continue
+                        
+                        if install_clicked:
+                            break
                     except:
-                        pass
-                    
+                        continue
+                
+                if install_clicked:
                     break
-                except:
-                    continue
+                
+                if attempt < 4:
+                    print(f"⏳ Waiting before retry... (attempt {attempt + 2}/5)")
+                    time.sleep(5)
             
-            # Wait for installation
+            if not install_clicked:
+                print("❌ Could not find or click Install button after 5 attempts")
+                return False
+            
+            # Wait for installation with dual verification
             print("⏳ Waiting for installation to complete...")
-            max_wait = 300
+            print("   Monitoring both Play Store UI and package manager...")
+            max_wait = 360  # 6 minutes for large app
             wait_time = 0
+            check_interval = 10
+            last_status = ""
             
             while wait_time < max_wait:
+                # Check UI for completion
                 try:
                     open_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
-                                                       'new UiSelector().textContains("Open")')
-                    print("✅ Installation completed successfully!")
+                                                       'new UiSelector().text("Open").className("android.widget.Button")')
+                    print("✅ Installation completed successfully (Open button appeared)!")
                     return True
                 except:
-                    # Also check if package is installed
-                    result = os.popen(f'adb shell pm list packages | grep {package_name}').read()
-                    if package_name in result:
-                        print("✅ App package detected on device!")
-                        return True
+                    pass
+                
+                # Check for progress indicators
+                try:
+                    # Look for download percentage or "Installing..." text
+                    progress_selectors = [
+                        'new UiSelector().textContains("Installing")',
+                        'new UiSelector().textContains("Downloading")',
+                        'new UiSelector().textContains("%")',
+                        'new UiSelector().resourceId("com.android.vending:id/progress_bar")'
+                    ]
                     
-                    time.sleep(10)
-                    wait_time += 10
-                    print(f"⏳ Still installing... ({wait_time}/{max_wait} seconds)")
+                    for selector in progress_selectors:
+                        try:
+                            progress_elem = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+                            status_text = progress_elem.text if hasattr(progress_elem, 'text') else "In progress"
+                            if status_text != last_status:
+                                print(f"📥 Status: {status_text}")
+                                last_status = status_text
+                            break
+                        except:
+                            continue
+                except:
+                    pass
+                
+                # Check package manager
+                try:
+                    import subprocess
+                    result = subprocess.run(['adb', 'shell', 'pm', 'list', 'packages'],
+                                          capture_output=True, text=True, timeout=5)
+                    if package_name in result.stdout:
+                        print("✅ App package detected on device!")
+                        time.sleep(5)  # Wait a bit more for installation to complete
+                        return True
+                except:
+                    pass
+                
+                time.sleep(check_interval)
+                wait_time += check_interval
+                
+                if wait_time % 30 == 0:
+                    print(f"⏳ Still waiting... ({wait_time}/{max_wait} seconds)")
             
-            print("⚠️  Installation timeout")
+            # Final verification
+            print("⏳ Performing final verification...")
+            time.sleep(10)
+            
+            try:
+                import subprocess
+                result = subprocess.run(['adb', 'shell', 'pm', 'list', 'packages', package_name],
+                                      capture_output=True, text=True, timeout=5)
+                if package_name in result.stdout:
+                    print("✅ Installation verified via package manager!")
+                    return True
+            except:
+                pass
+            
+            print("❌ Installation timeout - app was not installed")
             return False
             
         except Exception as e:
             print(f"❌ Error during deep link installation: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def cleanup(self):
