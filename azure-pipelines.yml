@@ -569,267 +569,251 @@ stages:
               fi
               
               echo ""
-              echo "📦 Method 2: Attempting Play Store installation with enhanced automation..."
+              echo "📦 Method 2: Using ADB to trigger Play Store installation..."
               echo ""
               
-              # Wake up the device and unlock
-              echo "📱 Waking up device..."
-              adb shell input keyevent KEYCODE_WAKEUP
-              sleep 2
-              adb shell input keyevent KEYCODE_MENU
-              sleep 2
+              # Method 2A: Try using pm install command with Play Store package
+              echo "🔧 Attempting to install via Play Store programmatically..."
               
-              # Try opening Play Store with deep link
-              echo "🔗 Opening Play Store with deep link..."
-              adb shell am start -a android.intent.action.VIEW -d "market://details?id=$PACKAGE_NAME"
+              # First, check if we can trigger installation via intent with flags
+              echo "Opening Play Store and triggering installation intent..."
+              adb shell am start -a android.intent.action.VIEW \
+                -d "market://details?id=$PACKAGE_NAME" \
+                -f 0x10000000
               
-              echo "⏳ Waiting for Play Store to load (20 seconds)..."
-              sleep 20
+              echo "⏳ Waiting for Play Store to open (10 seconds)..."
+              sleep 10
               
-              # Try to find and click Install button using multiple methods
-              echo "🔍 Attempting to locate and click Install button..."
+              # Take a screenshot for debugging
+              echo "📸 Capturing screen for debugging..."
+              adb shell screencap -p /sdcard/playstore_screen.png
+              adb pull /sdcard/playstore_screen.png /tmp/playstore_debug.png 2>/dev/null || true
               
-              # Method 1: Use uiautomator to find Install button coordinates
-              echo "  Method 1: Using UI Automator to locate button..."
+              # Dump UI and save to file for inspection
+              echo "📋 Dumping UI hierarchy for analysis..."
               adb shell uiautomator dump /sdcard/window_dump.xml 2>/dev/null
               sleep 2
               
-              # Try to extract Install button coordinates from XML
-              INSTALL_FOUND=false
-              if adb pull /sdcard/window_dump.xml /tmp/window_dump.xml 2>/dev/null; then
-                # Look for Install button in XML and extract bounds (BSD grep compatible)
-                # Use extended regex instead of Perl regex
-                BOUNDS=$(grep -i 'text="Install"' /tmp/window_dump.xml | grep -o 'bounds="\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]"' | head -1 | sed 's/bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]"/\1 \2 \3 \4/')
+              if adb pull /sdcard/window_dump.xml /tmp/ui_dump.xml 2>/dev/null; then
+                echo ""
+                echo "=== UI Dump Analysis ==="
+                echo "Looking for Install/Open/Update buttons..."
                 
-                if [ -z "$BOUNDS" ]; then
-                  # Try INSTALL in caps
-                  BOUNDS=$(grep -i 'text="INSTALL"' /tmp/window_dump.xml | grep -o 'bounds="\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]"' | head -1 | sed 's/bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]"/\1 \2 \3 \4/')
-                fi
-                
-                if [ -n "$BOUNDS" ]; then
-                  X1=$(echo $BOUNDS | awk '{print $1}')
-                  Y1=$(echo $BOUNDS | awk '{print $2}')
-                  X2=$(echo $BOUNDS | awk '{print $3}')
-                  Y2=$(echo $BOUNDS | awk '{print $4}')
-                  
-                  # Calculate center of button
-                  TAP_X=$(( (X1 + X2) / 2 ))
-                  TAP_Y=$(( (Y1 + Y2) / 2 ))
-                  
-                  echo "  ✅ Found Install button at [$X1,$Y1][$X2,$Y2]"
-                  echo "  🎯 Tapping at center: ($TAP_X, $TAP_Y)"
-                  
-                  adb shell input tap $TAP_X $TAP_Y
-                  INSTALL_FOUND=true
-                  echo "  ✅ Install button tapped!"
-                  sleep 5
+                # Check what buttons are actually present
+                if grep -iq "install" /tmp/ui_dump.xml; then
+                  echo "✅ Found 'Install' text in UI"
+                  grep -i "install" /tmp/ui_dump.xml | head -5
+                elif grep -iq "open" /tmp/ui_dump.xml; then
+                  echo "⚠️  Found 'Open' button - app might already be installed or installing"
+                  grep -i "open" /tmp/ui_dump.xml | head -5
+                elif grep -iq "update" /tmp/ui_dump.xml; then
+                  echo "⚠️  Found 'Update' button - an older version might be installed"
+                  grep -i "update" /tmp/ui_dump.xml | head -5
                 else
-                  echo "  ⚠️  Install button not found in UI dump"
-                  echo "  Dumping XML content for debugging:"
-                  grep -i "install\|play\|download" /tmp/window_dump.xml | head -20 || echo "No relevant content found"
+                  echo "⚠️  No Install/Open/Update button found"
+                  echo "Showing all clickable elements:"
+                  grep -i "clickable=\"true\"" /tmp/ui_dump.xml | grep "text=" | head -10
                 fi
+                echo "========================"
+                echo ""
               fi
               
-              # Method 2: Try using accessibility service and key events
-              if [ "$INSTALL_FOUND" = false ]; then
-                echo ""
-                echo "  Method 2: Using D-PAD navigation to find Install button..."
-                
-                # Move focus around the screen using D-PAD
-                for i in {1..3}; do
-                  adb shell input keyevent KEYCODE_DPAD_DOWN
-                  sleep 1
-                done
-                
-                # Try pressing enter
-                echo "  Attempting to press ENTER on focused element..."
-                adb shell input keyevent KEYCODE_ENTER
-                sleep 3
-                
-                # Check if installation started
-                adb shell uiautomator dump /sdcard/window_dump.xml 2>/dev/null
-                if adb pull /sdcard/window_dump.xml /tmp/window_dump2.xml 2>/dev/null; then
-                  if grep -qi "downloading\|installing\|pending" /tmp/window_dump2.xml; then
-                    echo "  ✅ Installation appears to have started!"
-                    INSTALL_FOUND=true
-                  fi
-                fi
-              fi
+              echo ""
+              echo "📦 Method 3: Advanced UI automation with detailed logging..."
+              echo ""
               
-              # Method 3: Try common button locations if UI Automator failed
-              if [ "$INSTALL_FOUND" = false ]; then
-                echo ""
-                echo "  Method 3: Trying common Install button locations..."
-                
-                # Get screen dimensions
-                SCREEN_SIZE=$(adb shell wm size | grep "Physical size" | cut -d: -f2 | tr -d ' ')
-                WIDTH=$(echo $SCREEN_SIZE | cut -dx -f1)
-                HEIGHT=$(echo $SCREEN_SIZE | cut -dx -f2)
-                
-                echo "  📱 Screen size: ${WIDTH}x${HEIGHT}"
-                
-                # Try multiple common locations for Install button (right side of screen, upper portion)
-                declare -a TAP_LOCATIONS=(
-                  "$((WIDTH * 4 / 5)) $((HEIGHT / 3))"      # Upper right
-                  "$((WIDTH * 3 / 4)) $((HEIGHT / 3))"      # Upper right-center
-                  "$((WIDTH * 7 / 8)) $((HEIGHT * 2 / 5))"  # Right side
-                  "$((WIDTH * 5 / 6)) $((HEIGHT / 3))"      # Far right
-                )
-                
-                for location in "${TAP_LOCATIONS[@]}"; do
-                  X=$(echo $location | awk '{print $1}')
-                  Y=$(echo $location | awk '{print $2}')
-                  echo "  🎯 Trying tap at: ($X, $Y)"
-                  adb shell input tap $X $Y
-                  sleep 5
+              # Try to find Install button with more detailed analysis
+              INSTALL_FOUND=false
+              
+              if [ -f /tmp/ui_dump.xml ]; then
+                # Look for Install button (case insensitive, multiple patterns)
+                for PATTERN in "Install" "INSTALL" "install" "GET" "Get"; do
+                  echo "  Searching for button with text: $PATTERN"
                   
-                  # Check if installation started after this tap
-                  adb shell uiautomator dump /sdcard/window_dump.xml 2>/dev/null
-                  if adb pull /sdcard/window_dump.xml /tmp/window_dump3.xml 2>/dev/null; then
-                    if grep -qi "downloading\|installing\|pending" /tmp/window_dump3.xml; then
-                      echo "  ✅ Installation started after tap!"
+                  # Extract bounds more carefully
+                  BUTTON_LINE=$(grep "text=\"$PATTERN\"" /tmp/ui_dump.xml | grep "clickable=\"true\"" | head -1)
+                  
+                  if [ -n "$BUTTON_LINE" ]; then
+                    echo "  ✅ Found clickable element with text '$PATTERN'"
+                    echo "  Element: $BUTTON_LINE"
+                    
+                    # Extract bounds using sed
+                    BOUNDS=$(echo "$BUTTON_LINE" | sed 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/')
+                    
+                    if [ "$BOUNDS" != "$BUTTON_LINE" ]; then
+                      X1=$(echo $BOUNDS | awk '{print $1}')
+                      Y1=$(echo $BOUNDS | awk '{print $2}')
+                      X2=$(echo $BOUNDS | awk '{print $3}')
+                      Y2=$(echo $BOUNDS | awk '{print $4}')
+                      
+                      TAP_X=$(( (X1 + X2) / 2 ))
+                      TAP_Y=$(( (Y1 + Y2) / 2 ))
+                      
+                      echo "  📍 Button bounds: [$X1,$Y1][$X2,$Y2]"
+                      echo "  🎯 Tapping at center: ($TAP_X, $TAP_Y)"
+                      
+                      adb shell input tap $TAP_X $TAP_Y
                       INSTALL_FOUND=true
-                      break
+                      
+                      echo "  ✅ Tapped! Waiting 5 seconds to check result..."
+                      sleep 5
+                      
+                      # Check if installation started
+                      adb shell uiautomator dump /sdcard/window_dump2.xml 2>/dev/null
+                      if adb pull /sdcard/window_dump2.xml /tmp/ui_dump2.xml 2>/dev/null; then
+                        if grep -qi "downloading\|installing\|pending\|cancel" /tmp/ui_dump2.xml; then
+                          echo "  ✅ Installation appears to have started!"
+                          break
+                        else
+                          echo "  ⚠️  No installation progress detected, trying next pattern..."
+                          INSTALL_FOUND=false
+                        fi
+                      fi
                     fi
                   fi
                 done
               fi
               
-              # Handle any confirmation dialogs
-              echo ""
-              echo "  Checking for confirmation dialogs..."
-              sleep 3
+              # Method 4: Try using UI Automator commands directly
+              if [ "$INSTALL_FOUND" = false ]; then
+                echo ""
+                echo "  Method 4: Using UI Automator commands..."
+                
+                # Try using uiautomator to click by text
+                echo "  Attempting to click Install button using UI Automator..."
+                adb shell uiautomator runtest << 'EOF' 2>/dev/null || true
+                import com.android.uiautomator.core.*;
+                import com.android.uiautomator.testrunner.*;
+                
+                public class ClickInstall extends UiAutomatorTestCase {
+                  public void testClick() throws Exception {
+                    UiObject installButton = new UiObject(new UiSelector().text("Install"));
+                    if (installButton.exists()) {
+                      installButton.click();
+                    }
+                  }
+                }
+              EOF
+                
+                sleep 3
+                
+                # Alternative: use input keyevents to navigate and press
+                echo "  Trying keyboard navigation..."
+                for i in {1..5}; do
+                  adb shell input keyevent KEYCODE_TAB
+                  sleep 1
+                done
+                adb shell input keyevent KEYCODE_ENTER
+                sleep 3
+              fi
               
-              # Try to find and click Continue/Accept buttons
-              adb shell uiautomator dump /sdcard/window_dump.xml 2>/dev/null
-              if adb pull /sdcard/window_dump.xml /tmp/window_dump_dialogs.xml 2>/dev/null; then
-                for BUTTON_TEXT in "Continue" "Accept" "OK" "Agree" "CONTINUE" "ACCEPT"; do
-                  BOUNDS=$(grep "text=\"$BUTTON_TEXT\"" /tmp/window_dump_dialogs.xml | grep -o 'bounds="\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]"' | head -1 | sed 's/bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]"/\1 \2 \3 \4/')
-                  if [ -n "$BOUNDS" ]; then
-                    X1=$(echo $BOUNDS | awk '{print $1}')
-                    Y1=$(echo $BOUNDS | awk '{print $2}')
-                    X2=$(echo $BOUNDS | awk '{print $3}')
-                    Y2=$(echo $BOUNDS | awk '{print $4}')
-                    TAP_X=$(( (X1 + X2) / 2 ))
-                    TAP_Y=$(( (Y1 + Y2) / 2 ))
-                    echo "  ✅ Clicking '$BUTTON_TEXT' button at ($TAP_X, $TAP_Y)"
-                    adb shell input tap $TAP_X $TAP_Y
-                    sleep 3
+              # Handle potential login/account selection dialogs
+              echo ""
+              echo "  Checking for account selection or login dialogs..."
+              adb shell uiautomator dump /sdcard/window_dump3.xml 2>/dev/null
+              if adb pull /sdcard/window_dump3.xml /tmp/ui_dump3.xml 2>/dev/null; then
+                # Look for Continue, Accept, or account selection buttons
+                for BUTTON_TEXT in "Continue" "CONTINUE" "Accept" "ACCEPT" "OK"; do
+                  BUTTON_LINE=$(grep "text=\"$BUTTON_TEXT\"" /tmp/ui_dump3.xml | grep "clickable=\"true\"" | head -1)
+                  
+                  if [ -n "$BUTTON_LINE" ]; then
+                    echo "  ✅ Found '$BUTTON_TEXT' button, clicking it..."
+                    BOUNDS=$(echo "$BUTTON_LINE" | sed 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/')
+                    
+                    if [ "$BOUNDS" != "$BUTTON_LINE" ]; then
+                      X1=$(echo $BOUNDS | awk '{print $1}')
+                      Y1=$(echo $BOUNDS | awk '{print $2}')
+                      X2=$(echo $BOUNDS | awk '{print $3}')
+                      Y2=$(echo $BOUNDS | awk '{print $4}')
+                      
+                      TAP_X=$(( (X1 + X2) / 2 ))
+                      TAP_Y=$(( (Y1 + Y2) / 2 ))
+                      
+                      adb shell input tap $TAP_X $TAP_Y
+                      sleep 3
+                    fi
                   fi
                 done
               fi
               
-              if [ "$INSTALL_FOUND" = false ]; then
-                echo ""
-                echo "⚠️  WARNING: Could not confirm Install button was clicked"
-                echo "     Continuing to monitor for installation anyway..."
-                echo ""
-              fi
-              
               echo ""
-              echo "⏳ Waiting for installation to complete..."
-              echo "   Monitoring: UI changes, download progress, and package manager"
-              echo "   This may take 5-10 minutes for a 170 MB app"
+              echo "⏳ Monitoring for app installation (max 10 minutes)..."
+              echo "   Checking package manager and Play Store state"
               echo ""
               
-              # Wait and check for installation with comprehensive monitoring
-              MAX_WAIT=600  # 10 minutes for 170 MB app
+              # Enhanced monitoring loop
+              MAX_WAIT=600
               ELAPSED=0
               CHECK_INTERVAL=15
-              LAST_PROGRESS=""
               
               while [ $ELAPSED -lt $MAX_WAIT ]; do
-                # Check 1: Package manager (most reliable)
+                # Check if package is installed
                 if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
                   echo ""
                   echo "✅ App package detected in system!"
+                  sleep 5
                   
-                  # Verify it's fully installed (not just being installed)
-                  sleep 10
-                  
+                  # Verify it's actually installed and not just downloading
                   if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
-                    echo "✅ Installation verified successfully!"
+                    echo "✅ Installation confirmed!"
                     
-                    # Get app info
                     APP_INFO=$(adb shell dumpsys package $PACKAGE_NAME | grep -E "versionName|versionCode" | head -2 2>/dev/null || echo "version info unavailable")
                     echo ""
-                    echo "📱 App info:"
+                    echo "📱 Installed app info:"
                     echo "$APP_INFO"
                     echo ""
                     exit 0
                   fi
                 fi
                 
-                # Check 2: Look for progress indicators in UI
-                if adb shell uiautomator dump /sdcard/window_dump.xml 2>/dev/null; then
-                  if adb pull /sdcard/window_dump.xml /tmp/window_dump_monitor.xml 2>/dev/null; then
-                    # Check for "Open" button (installation complete)
-                    if grep -q 'text="Open"' /tmp/window_dump_monitor.xml || grep -q 'text="OPEN"' /tmp/window_dump_monitor.xml; then
-                      echo ""
-                      echo "✅ 'Open' button detected - installation complete!"
-                      sleep 5
-                      
-                      # Verify in package manager
-                      if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
-                        echo "✅ Verified via package manager!"
-                        exit 0
-                      fi
-                    fi
-                    
-                    # Check for download/install progress (BSD grep compatible - no -P flag)
-                    # Look for percentage or status text
-                    PROGRESS=$(grep -o 'text="[^"]*%' /tmp/window_dump_monitor.xml | head -1 | sed 's/text="//;s/%/%/')
-                    if [ -z "$PROGRESS" ]; then
-                      PROGRESS=$(grep -o 'text="Downloading[^"]*"' /tmp/window_dump_monitor.xml | head -1 | sed 's/text="//;s/"//')
-                    fi
-                    if [ -z "$PROGRESS" ]; then
-                      PROGRESS=$(grep -o 'text="Installing[^"]*"' /tmp/window_dump_monitor.xml | head -1 | sed 's/text="//;s/"//')
-                    fi
-                    
-                    if [ -n "$PROGRESS" ] && [ "$PROGRESS" != "$LAST_PROGRESS" ]; then
-                      echo "  📥 Progress: $PROGRESS"
-                      LAST_PROGRESS="$PROGRESS"
-                    fi
-                    
-                    # Check for error messages
-                    if grep -qE 'Error|Failed|Cannot|Unable' /tmp/window_dump_monitor.xml; then
-                      ERROR_MSG=$(grep -o 'text="[^"]*Error[^"]*"' /tmp/window_dump_monitor.xml | head -1 | sed 's/text="//;s/"//')
-                      if [ -z "$ERROR_MSG" ]; then
-                        ERROR_MSG=$(grep -o 'text="[^"]*Failed[^"]*"' /tmp/window_dump_monitor.xml | head -1 | sed 's/text="//;s/"//')
-                      fi
-                      if [ -n "$ERROR_MSG" ]; then
-                        echo "  ⚠️  Possible error: $ERROR_MSG"
-                      fi
+                # Check UI state periodically
+                if [ $((ELAPSED % 60)) -eq 0 ]; then
+                  MINUTES=$((ELAPSED / 60))
+                  echo "  ⏳ Still waiting... ($MINUTES minutes elapsed)"
+                  
+                  # Check UI for progress
+                  adb shell uiautomator dump /sdcard/window_dump.xml 2>/dev/null
+                  if adb pull /sdcard/window_dump.xml /tmp/ui_check.xml 2>/dev/null; then
+                    if grep -q 'text="Open"' /tmp/ui_check.xml || grep -q 'text="OPEN"' /tmp/ui_check.xml; then
+                      echo "     'Open' button detected - checking package manager..."
+                    elif grep -qi "download\|install\|pending" /tmp/ui_check.xml; then
+                      echo "     Installation in progress..."
+                    elif grep -qi "error\|failed\|unable\|unavailable" /tmp/ui_check.xml; then
+                      echo "     ⚠️  Possible error detected in UI"
+                      grep -i "error\|failed" /tmp/ui_check.xml | head -3 || true
+                    else
+                      echo "     Play Store is active (state unknown)"
                     fi
                   fi
                 fi
                 
                 sleep $CHECK_INTERVAL
                 ELAPSED=$((ELAPSED + CHECK_INTERVAL))
-                
-                if [ $((ELAPSED % 60)) -eq 0 ]; then
-                  MINUTES=$((ELAPSED / 60))
-                  echo "  ⏳ Still waiting... ($MINUTES minutes elapsed)"
-                  
-                  # Show that we're still monitoring
-                  if adb shell dumpsys window | grep -q "mCurrentFocus.*vending"; then
-                    echo "     Play Store is still active"
-                  fi
-                fi
               done
               
               echo ""
-              echo "⚠️  Installation timeout after $((MAX_WAIT / 60)) minutes"
+              echo "⚠️  Installation timeout after 10 minutes"
               echo ""
-              echo "💡 RECOMMENDATION: Add the APK file to your repository for faster, more reliable installation"
-              echo "   Place the APK at: app/Eptura_Engage.apk or Eptura_Engage.apk"
-              echo ""
-              echo "📋 Current Play Store UI state (last dump):"
-              if [ -f /tmp/window_dump_monitor.xml ]; then
-                grep -i "install\|download\|error\|open" /tmp/window_dump_monitor.xml | head -30 || echo "No relevant UI elements found"
+              echo "📋 Final UI state analysis:"
+              if [ -f /tmp/ui_check.xml ]; then
+                echo "=== Last captured UI elements ==="
+                grep -i "install\|open\|download\|error\|unavailable" /tmp/ui_check.xml | grep "text=" | head -20 || echo "No relevant UI elements found"
+                echo "================================"
               fi
               echo ""
-              echo "⚠️  Continuing pipeline - tests will likely fail without the app installed"
+              echo "💡 SOLUTION: Since Play Store automation is unreliable, please use one of these options:"
+              echo ""
+              echo "   Option 1 (Recommended): Download the APK and add it to your repository"
+              echo "   - Place the APK at: app/Eptura_Engage.apk"
+              echo "   - Commit and push to repository"
+              echo ""
+              echo "   Option 2: Use a pre-signed test APK from a secure location"
+              echo "   - Add a download step in the pipeline to fetch from Azure Storage or similar"
+              echo ""
+              echo "   Option 3: Build the APK from source as part of the pipeline"
+              echo "   - Add Android build steps before the test stage"
+              echo ""
+              echo "⚠️  Continuing pipeline - tests will fail without the app installed"
             displayName: 'Install App from Play Store'
             env:
               GOOGLE_PLAY_EMAIL: $(GOOGLE_PLAY_EMAIL)
