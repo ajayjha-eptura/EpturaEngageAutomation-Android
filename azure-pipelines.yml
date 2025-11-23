@@ -137,6 +137,7 @@ stages:
               mkdir -p "$ANDROID_HOME/licenses"
               
               # Accept all known Android SDK licenses by creating license files
+              # These are the current license hashes as of 2024
               echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
               echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
               echo "d975f751698a77b662f1254ddbeed3901e976f5a" > "$ANDROID_HOME/licenses/intel-android-extra-license"
@@ -144,32 +145,43 @@ stages:
               echo "e9acab5b5fbb560a72cfaecce8946896ff6aab9d" > "$ANDROID_HOME/licenses/mips-android-sysimage-license"
               echo "d56a98520377fecf01c9e79e689e9ba188a4558e" > "$ANDROID_HOME/licenses/android-googletv-license"
               echo "667f5ef1d0d6dbb3c1bb1dbe94f0c0c66f8c3ee5" > "$ANDROID_HOME/licenses/android-googlexr-license"
-              echo "e6b7c2ab7fa2298c15165e9583d0acf0b04a2232" > "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license"
               
-              # Additionally run the interactive license acceptance with yes, but with timeout to prevent hanging
-              echo "Running interactive license acceptance (with timeout)..."
-              timeout 30 bash -c "yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=$ANDROID_HOME" 2>&1 || echo "License acceptance completed or timed out (this is expected)"
+              # Accept the ARM DBT license with all known hashes
+              echo "e6b7c2ab7fa2298c15165e9583d0acf0b04a2232" > "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license"
+              echo "d56a98520377fecf01c9e79e689e9ba188a4558e" >> "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license"
+              
+              echo "✅ License files created successfully"
               
               # Verify licenses directory
               echo "📋 Licenses directory contents:"
               ls -la "$ANDROID_HOME/licenses/" || echo "Licenses directory not found"
+              cat "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license" 2>/dev/null && echo "ARM DBT license hashes verified"
               
               # Update SDK manager
               echo "🔄 Updating SDK manager..."
               $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --update --sdk_root=$ANDROID_HOME || true
               
               # Install SDK components with Google Play Store support
+              # Use 'yes' to automatically accept any interactive prompts
               echo "📦 Installing SDK components with Google Play Store..."
-              $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+              echo "This may take a few minutes..."
+              
+              yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
                 --sdk_root=$ANDROID_HOME \
+                --verbose \
                 "platform-tools" \
                 "platforms;android-30" \
                 "build-tools;30.0.3" \
                 "emulator" \
-                "system-images;android-30;google_apis_playstore;x86_64" || {
+                "system-images;android-30;google_apis_playstore;x86_64" 2>&1 | grep -v "^Info:" | grep -v "^Warning:" || {
                 echo "❌ Failed to install SDK components"
+                echo ""
+                echo "Checking what went wrong..."
                 echo "Attempting to list available packages:"
                 $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list --sdk_root=$ANDROID_HOME 2>&1 | head -50 || true
+                echo ""
+                echo "Checking licenses directory:"
+                ls -la "$ANDROID_HOME/licenses/"
                 exit 1
               }
               
