@@ -1092,7 +1092,7 @@ stages:
               # Create a comprehensive debug report
               echo ""
               echo "📝 Creating debug report..."
-              cat > playstore_screenshots/DEBUG_REPORT.txt << EOF
+              cat > playstore_screenshots/DEBUG_REPORT.txt << 'EOF'
 =================================================================
 PLAY STORE INSTALLATION DEBUG REPORT
 Generated: $(date)
