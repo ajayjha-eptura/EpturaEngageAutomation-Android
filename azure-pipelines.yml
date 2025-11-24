@@ -397,7 +397,7 @@ stages:
                   echo "=== ADB Devices ==="
                   adb devices -l
                   echo ""
-                  echo "⚠️  Continuing anyway - tests may fail if emulator is not responsive"
+                  "⚠️  Continuing anyway - tests may fail if emulator is not responsive"
                   # Don't exit - allow the pipeline to continue and let the test phase handle failures
                 fi
               fi
@@ -538,6 +538,47 @@ stages:
               # Define package name
               PACKAGE_NAME="com.condecosoftware.condeco"
               
+              # Function to dismiss error dialogs
+              dismiss_error_dialogs() {
+                # Check for common error dialogs and dismiss them
+                adb shell uiautomator dump /sdcard/window_dump_check.xml 2>/dev/null
+                if adb pull /sdcard/window_dump_check.xml /tmp/error_check.xml 2>/dev/null; then
+                  # Check for "isn't responding" dialogs
+                  if grep -q "isn't responding\|not responding\|has stopped" /tmp/error_check.xml; then
+                    echo "  ⚠️  Detected error dialog, attempting to dismiss..."
+                    
+                    # Try to click "Wait" or "Close app" button
+                    for BUTTON_TEXT in "Wait" "Close app" "OK"; do
+                      if grep -q "text=\"$BUTTON_TEXT\"" /tmp/error_check.xml; then
+                        BUTTON_LINE=$(grep "text=\"$BUTTON_TEXT\"" /tmp/error_check.xml | grep "clickable=\"true\"" | head -1)
+                        if [ -n "$BUTTON_LINE" ]; then
+                          BOUNDS=$(echo "$BUTTON_LINE" | sed 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/')
+                          if [ "$BOUNDS" != "$BUTTON_LINE" ]; then
+                            X1=$(echo $BOUNDS | awk '{print $1}')
+                            Y1=$(echo $BOUNDS | awk '{print $2}')
+                            X2=$(echo $BOUNDS | awk '{print $3}')
+                            Y2=$(echo $BOUNDS | awk '{print $4}')
+                            TAP_X=$(( (X1 + X2) / 2 ))
+                            TAP_Y=$(( (Y1 + Y2) / 2 ))
+                            echo "  🖱️  Clicking '$BUTTON_TEXT' button..."
+                            adb shell input tap $TAP_X $TAP_Y
+                            sleep 2
+                            return 0
+                          fi
+                        fi
+                      fi
+                    done
+                    
+                    # If buttons not found, try back button
+                    echo "  ⬅️  Trying back button..."
+                    adb shell input keyevent KEYCODE_BACK
+                    sleep 1
+                    return 0
+                  fi
+                fi
+                return 1
+              }
+              
               # Check if app is already installed
               if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
                 echo "✅ App is already installed!"
@@ -572,29 +613,51 @@ stages:
               echo "📦 Method 2: Using ADB to trigger Play Store installation..."
               echo ""
               
-              # Method 2A: Try using pm install command with Play Store package
-              echo "🔧 Attempting to install via Play Store programmatically..."
+              # Dismiss any existing error dialogs before starting
+              echo "🧹 Checking for and dismissing any error dialogs..."
+              dismiss_error_dialogs
               
-              # First, check if we can trigger installation via intent with flags
+              # Close any running apps first
+              echo "🧹 Closing any running apps..."
+              adb shell am force-stop com.android.vending 2>/dev/null || true
+              sleep 2
+              
+              # Clear Play Store cache to avoid issues
+              echo "🧹 Clearing Play Store cache..."
+              adb shell pm clear com.android.vending 2>/dev/null || true
+              sleep 3
+              
+              echo "🔧 Attempting to install via Play Store programmatically..."
               echo "Opening Play Store and triggering installation intent..."
               adb shell am start -a android.intent.action.VIEW \
                 -d "market://details?id=$PACKAGE_NAME" \
                 -f 0x10000000
               
-              echo "⏳ Waiting for Play Store to open (10 seconds)..."
-              sleep 10
+              echo "⏳ Waiting for Play Store to open (15 seconds)..."
+              sleep 15
+              
+              # Dismiss any error dialogs that appeared
+              dismiss_error_dialogs
               
               # Take a screenshot for debugging
               echo "📸 Capturing screen for debugging..."
-              adb shell screencap -p /sdcard/playstore_screen.png
-              adb pull /sdcard/playstore_screen.png /tmp/playstore_debug.png 2>/dev/null || true
+              adb shell screencap -p /sdcard/playstore_screen.png 2>/dev/null || true
               
               # Dump UI and save to file for inspection
               echo "📋 Dumping UI hierarchy for analysis..."
               adb shell uiautomator dump /sdcard/window_dump.xml 2>/dev/null
               sleep 2
               
+              # Check if we're actually on the Play Store page
+              PLAY_STORE_OPEN=false
               if adb pull /sdcard/window_dump.xml /tmp/ui_dump.xml 2>/dev/null; then
+                if grep -q "com.android.vending" /tmp/ui_dump.xml; then
+                  PLAY_STORE_OPEN=true
+                  echo "✅ Play Store page is open"
+                else
+                  echo "⚠️  Play Store may not have opened correctly"
+                fi
+                
                 echo ""
                 echo "=== UI Dump Analysis ==="
                 echo "Looking for Install/Open/Update buttons..."
@@ -602,40 +665,67 @@ stages:
                 # Check what buttons are actually present
                 if grep -iq "install" /tmp/ui_dump.xml; then
                   echo "✅ Found 'Install' text in UI"
-                  grep -i "install" /tmp/ui_dump.xml | head -5
+                  grep -i "install" /tmp/ui_dump.xml | grep "text=" | head -3
                 elif grep -iq "open" /tmp/ui_dump.xml; then
-                  echo "⚠️  Found 'Open' button - app might already be installed or installing"
-                  grep -i "open" /tmp/ui_dump.xml | head -5
+                  echo "⚠️  Found 'Open' button - app might already be installed"
+                  grep -i "open" /tmp/ui_dump.xml | grep "text=" | head -3
                 elif grep -iq "update" /tmp/ui_dump.xml; then
                   echo "⚠️  Found 'Update' button - an older version might be installed"
-                  grep -i "update" /tmp/ui_dump.xml | head -5
+                elif grep -iq "isn't responding\|not responding\|has stopped" /tmp/ui_dump.xml; then
+                  echo "❌ ERROR: System error dialog detected!"
+                  grep -i "isn't responding\|not responding\|has stopped" /tmp/ui_dump.xml | head -3
+                  echo ""
+                  echo "The emulator has stability issues. Showing full UI dump:"
+                  cat /tmp/ui_dump.xml
+                  echo ""
+                  echo "❌ CRITICAL: Cannot proceed with Play Store installation due to system errors"
+                  echo ""
+                  echo "💡 RECOMMENDED SOLUTIONS:"
+                  echo ""
+                  echo "   Option 1 (BEST): Add APK file to repository"
+                  echo "   - Download the Eptura Engage APK"
+                  echo "   - Place it at: app/Eptura_Engage.apk"
+                  echo "   - Commit and push to your repository"
+                  echo "   - This method is reliable and doesn't depend on Play Store"
+                  echo ""
+                  echo "   Option 2: Use Azure Storage or secure download"
+                  echo "   - Upload APK to Azure Storage or similar"
+                  echo "   - Add download step before this installation step"
+                  echo ""
+                  echo "⚠️  Play Store automation is NOT reliable in CI/CD environments!"
+                  echo ""
+                  exit 1
                 else
                   echo "⚠️  No Install/Open/Update button found"
-                  echo "Showing all clickable elements:"
-                  grep -i "clickable=\"true\"" /tmp/ui_dump.xml | grep "text=" | head -10
+                  echo "Showing clickable elements with text:"
+                  grep -i "clickable=\"true\"" /tmp/ui_dump.xml | grep "text=" | grep -v 'text=""' | head -10
                 fi
                 echo "========================"
                 echo ""
               fi
               
+              # If system error detected, stop immediately
+              if grep -q "isn't responding\|not responding\|has stopped" /tmp/ui_dump.xml 2>/dev/null; then
+                echo "❌ Cannot continue - system errors present"
+                exit 1
+              fi
+              
               echo ""
-              echo "📦 Method 3: Advanced UI automation with detailed logging..."
+              echo "📦 Method 3: Advanced UI automation to click Install button..."
               echo ""
               
-              # Try to find Install button with more detailed analysis
+              # Try to find and click Install button
               INSTALL_FOUND=false
               
               if [ -f /tmp/ui_dump.xml ]; then
                 # Look for Install button (case insensitive, multiple patterns)
                 for PATTERN in "Install" "INSTALL" "install" "GET" "Get"; do
-                  echo "  Searching for button with text: $PATTERN"
+                  echo "  🔍 Searching for button with text: $PATTERN"
                   
-                  # Extract bounds more carefully
                   BUTTON_LINE=$(grep "text=\"$PATTERN\"" /tmp/ui_dump.xml | grep "clickable=\"true\"" | head -1)
                   
                   if [ -n "$BUTTON_LINE" ]; then
                     echo "  ✅ Found clickable element with text '$PATTERN'"
-                    echo "  Element: $BUTTON_LINE"
                     
                     # Extract bounds using sed
                     BOUNDS=$(echo "$BUTTON_LINE" | sed 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/')
@@ -655,7 +745,7 @@ stages:
                       adb shell input tap $TAP_X $TAP_Y
                       INSTALL_FOUND=true
                       
-                      echo "  ✅ Tapped! Waiting 5 seconds to check result..."
+                      echo "  ✅ Tapped! Waiting 5 seconds..."
                       sleep 5
                       
                       # Check if installation started
@@ -665,7 +755,7 @@ stages:
                           echo "  ✅ Installation appears to have started!"
                           break
                         else
-                          echo "  ⚠️  No installation progress detected, trying next pattern..."
+                          echo "  ⚠️  No installation progress detected"
                           INSTALL_FOUND=false
                         fi
                       fi
@@ -674,86 +764,93 @@ stages:
                 done
               fi
               
-              # Method 4: Try using UI Automator commands directly
+              # If Install button not found or clicked, try alternative methods
               if [ "$INSTALL_FOUND" = false ]; then
                 echo ""
-                echo "  Method 4: Using UI Automator commands..."
+                echo "  ⚠️  Could not automatically click Install button"
+                echo "  📱 Trying keyboard navigation..."
                 
-                # Try using uiautomator to click by text
-                echo "  Attempting to click Install button using UI Automator..."
-                adb shell uiautomator runtest << 'EOF' 2>/dev/null || true
-                import com.android.uiautomator.core.*;
-                import com.android.uiautomator.testrunner.*;
-                
-                public class ClickInstall extends UiAutomatorTestCase {
-                  public void testClick() throws Exception {
-                    UiObject installButton = new UiObject(new UiSelector().text("Install"));
-                    if (installButton.exists()) {
-                      installButton.click();
-                    }
-                  }
-                }
-              EOF
-                
-                sleep 3
-                
-                # Alternative: use input keyevents to navigate and press
-                echo "  Trying keyboard navigation..."
-                for i in {1..5}; do
+                # Try tab navigation and enter
+                for i in {1..3}; do
                   adb shell input keyevent KEYCODE_TAB
-                  sleep 1
+                  sleep 0.5
                 done
                 adb shell input keyevent KEYCODE_ENTER
                 sleep 3
               fi
               
-              # Handle potential login/account selection dialogs
+              # Check for and handle account selection or permission dialogs
               echo ""
-              echo "  Checking for account selection or login dialogs..."
+              echo "🔍 Checking for account selection or permission dialogs..."
               adb shell uiautomator dump /sdcard/window_dump3.xml 2>/dev/null
               if adb pull /sdcard/window_dump3.xml /tmp/ui_dump3.xml 2>/dev/null; then
-                # Look for Continue, Accept, or account selection buttons
                 for BUTTON_TEXT in "Continue" "CONTINUE" "Accept" "ACCEPT" "OK"; do
-                  BUTTON_LINE=$(grep "text=\"$BUTTON_TEXT\"" /tmp/ui_dump3.xml | grep "clickable=\"true\"" | head -1)
-                  
-                  if [ -n "$BUTTON_LINE" ]; then
-                    echo "  ✅ Found '$BUTTON_TEXT' button, clicking it..."
-                    BOUNDS=$(echo "$BUTTON_LINE" | sed 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/')
+                  if grep -q "text=\"$BUTTON_TEXT\"" /tmp/ui_dump3.xml; then
+                    BUTTON_LINE=$(grep "text=\"$BUTTON_TEXT\"" /tmp/ui_dump3.xml | grep "clickable=\"true\"" | head -1)
                     
-                    if [ "$BOUNDS" != "$BUTTON_LINE" ]; then
-                      X1=$(echo $BOUNDS | awk '{print $1}')
-                      Y1=$(echo $BOUNDS | awk '{print $2}')
-                      X2=$(echo $BOUNDS | awk '{print $3}')
-                      Y2=$(echo $BOUNDS | awk '{print $4}')
+                    if [ -n "$BUTTON_LINE" ]; then
+                      echo "  ✅ Found '$BUTTON_TEXT' button, clicking it..."
+                      BOUNDS=$(echo "$BUTTON_LINE" | sed 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/')
                       
-                      TAP_X=$(( (X1 + X2) / 2 ))
-                      TAP_Y=$(( (Y1 + Y2) / 2 ))
-                      
-                      adb shell input tap $TAP_X $TAP_Y
-                      sleep 3
+                      if [ "$BOUNDS" != "$BUTTON_LINE" ]; then
+                        X1=$(echo $BOUNDS | awk '{print $1}')
+                        Y1=$(echo $BOUNDS | awk '{print $2}')
+                        X2=$(echo $BOUNDS | awk '{print $3}')
+                        Y2=$(echo $BOUNDS | awk '{print $4}')
+                        
+                        TAP_X=$(( (X1 + X2) / 2 ))
+                        TAP_Y=$(( (Y1 + Y2) / 2 ))
+                        
+                        adb shell input tap $TAP_X $TAP_Y
+                        sleep 3
+                        break
+                      fi
                     fi
                   fi
                 done
               fi
               
               echo ""
-              echo "⏳ Monitoring for app installation (max 10 minutes)..."
-              echo "   Checking package manager and Play Store state"
+              echo "⏳ Monitoring for app installation (max 3 minutes)..."
+              echo "   Will check every 10 seconds for package installation"
               echo ""
               
-              # Enhanced monitoring loop
-              MAX_WAIT=600
+              # Reduced monitoring loop - 3 minutes max instead of 10
+              MAX_WAIT=180
               ELAPSED=0
-              CHECK_INTERVAL=15
+              CHECK_INTERVAL=10
+              ERROR_DIALOG_COUNT=0
               
               while [ $ELAPSED -lt $MAX_WAIT ]; do
+                # Dismiss error dialogs
+                if dismiss_error_dialogs; then
+                  ERROR_DIALOG_COUNT=$((ERROR_DIALOG_COUNT + 1))
+                  echo "  ⚠️  Dismissed error dialog (count: $ERROR_DIALOG_COUNT)"
+                  
+                  # If too many errors, give up
+                  if [ $ERROR_DIALOG_COUNT -ge 3 ]; then
+                    echo ""
+                    echo "❌ Too many system errors detected ($ERROR_DIALOG_COUNT)"
+                    echo "The emulator is unstable and cannot complete Play Store installation"
+                    echo ""
+                    break
+                  fi
+                  
+                  # Try reopening Play Store after error
+                  echo "  🔄 Reopening Play Store..."
+                  adb shell am start -a android.intent.action.VIEW \
+                    -d "market://details?id=$PACKAGE_NAME" \
+                    -f 0x10000000
+                  sleep 5
+                fi
+                
                 # Check if package is installed
-                if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
+                if adb shell pm list packages 2>/dev/null | grep -q "$PACKAGE_NAME"; then
                   echo ""
                   echo "✅ App package detected in system!"
                   sleep 5
                   
-                  # Verify it's actually installed and not just downloading
+                  # Verify it's actually installed
                   if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
                     echo "✅ Installation confirmed!"
                     
@@ -766,23 +863,24 @@ stages:
                   fi
                 fi
                 
-                # Check UI state periodically
-                if [ $((ELAPSED % 60)) -eq 0 ]; then
-                  MINUTES=$((ELAPSED / 60))
-                  echo "  ⏳ Still waiting... ($MINUTES minutes elapsed)"
+                # Check UI state every 30 seconds
+                if [ $((ELAPSED % 30)) -eq 0 ] && [ $ELAPSED -gt 0 ]; then
+                  echo "  ⏳ Still waiting... ($ELAPSED seconds elapsed)"
                   
-                  # Check UI for progress
-                  adb shell uiautomator dump /sdcard/window_dump.xml 2>/dev/null
-                  if adb pull /sdcard/window_dump.xml /tmp/ui_check.xml 2>/dev/null; then
-                    if grep -q 'text="Open"' /tmp/ui_check.xml || grep -q 'text="OPEN"' /tmp/ui_check.xml; then
-                      echo "     'Open' button detected - checking package manager..."
-                    elif grep -qi "download\|install\|pending" /tmp/ui_check.xml; then
-                      echo "     Installation in progress..."
-                    elif grep -qi "error\|failed\|unable\|unavailable" /tmp/ui_check.xml; then
-                      echo "     ⚠️  Possible error detected in UI"
-                      grep -i "error\|failed" /tmp/ui_check.xml | head -3 || true
+                  # Check UI for progress or errors
+                  adb shell uiautomator dump /sdcard/window_dump_progress.xml 2>/dev/null
+                  if adb pull /sdcard/window_dump_progress.xml /tmp/ui_progress.xml 2>/dev/null; then
+                    if grep -q 'text="Open"' /tmp/ui_progress.xml || grep -q 'text="OPEN"' /tmp/ui_progress.xml; then
+                      echo "     ✅ 'Open' button detected - checking package manager..."
+                    elif grep -qi "download\|install\|pending" /tmp/ui_progress.xml; then
+                      echo "     📥 Installation in progress..."
+                    elif grep -qi "error\|failed\|unable\|unavailable\|can't install" /tmp/ui_progress.xml; then
+                      echo "     ❌ Error detected in UI!"
+                      grep -i "error\|failed\|unable" /tmp/ui_progress.xml | grep "text=" | head -3
+                      echo "     Installation appears to have failed"
+                      break
                     else
-                      echo "     Play Store is active (state unknown)"
+                      echo "     ⏳ Play Store active (state unknown)"
                     fi
                   fi
                 fi
@@ -791,33 +889,44 @@ stages:
                 ELAPSED=$((ELAPSED + CHECK_INTERVAL))
               done
               
-              echo ""
-              echo "⚠️  Installation timeout after 10 minutes"
-              echo ""
-              echo "📋 Final UI state analysis:"
-              if [ -f /tmp/ui_check.xml ]; then
-                echo "=== Last captured UI elements ==="
-                grep -i "install\|open\|download\|error\|unavailable" /tmp/ui_check.xml | grep "text=" | head -20 || echo "No relevant UI elements found"
-                echo "================================"
+              # Final check
+              if adb shell pm list packages 2>/dev/null | grep -q "$PACKAGE_NAME"; then
+                echo "✅ App installed successfully!"
+                exit 0
               fi
+              
               echo ""
-              echo "💡 SOLUTION: Since Play Store automation is unreliable, please use one of these options:"
+              echo "❌ Installation failed or timed out after $ELAPSED seconds"
               echo ""
-              echo "   Option 1 (Recommended): Download the APK and add it to your repository"
-              echo "   - Place the APK at: app/Eptura_Engage.apk"
-              echo "   - Commit and push to repository"
+              
+              # Show final state
+              if [ -f /tmp/ui_progress.xml ]; then
+                echo "📋 Final UI state:"
+                echo "=================="
+                grep -i "install\|open\|download\|error\|unavailable\|failed" /tmp/ui_progress.xml | grep "text=" | grep -v 'text=""' | head -15 || echo "No relevant UI elements found"
+                echo "=================="
+              fi
+              
               echo ""
-              echo "   Option 2: Use a pre-signed test APK from a secure location"
-              echo "   - Add a download step in the pipeline to fetch from Azure Storage or similar"
+              echo "❌ PLAY STORE AUTOMATION FAILED"
               echo ""
-              echo "   Option 3: Build the APK from source as part of the pipeline"
-              echo "   - Add Android build steps before the test stage"
+              echo "💡 SOLUTION: Play Store automation is unreliable in CI/CD environments."
               echo ""
-              echo "⚠️  Continuing pipeline - tests will fail without the app installed"
+              echo "   📱 RECOMMENDED: Add APK file to your repository"
+              echo "   ────────────────────────────────────────────────"
+              echo "   1. Download the Eptura Engage APK file"
+              echo "   2. Create folder: mkdir -p app"
+              echo "   3. Place APK: app/Eptura_Engage.apk"
+              echo "   4. Commit and push to repository"
+              echo "   5. This pipeline will automatically install it"
+              echo ""
+              echo "   Alternative options:"
+              echo "   • Use Azure Storage with SAS token to download APK"
+              echo "   • Build APK from source in pipeline"
+              echo ""
+              exit 1
             displayName: 'Install App from Play Store'
-            env:
-              GOOGLE_PLAY_EMAIL: $(GOOGLE_PLAY_EMAIL)
-              GOOGLE_PLAY_PASSWORD: $(GOOGLE_PLAY_PASSWORD)
+            continueOnError: false
 
           - task: DownloadBuildArtifacts@1
             displayName: 'Download Build Artifacts'
