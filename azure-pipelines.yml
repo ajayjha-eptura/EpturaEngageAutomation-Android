@@ -558,8 +558,6 @@ stages:
                             Y1=$(echo $BOUNDS | awk '{print $2}')
                             X2=$(echo $BOUNDS | awk '{print $3}')
                             Y2=$(echo $BOUNDS | awk '{print $4}')
-                            TAP_X=$(( (X1 + X2) / 2 ))
-                            TAP_Y=$(( (Y1 + Y2) / 2 ))
                             echo "  🖱️  Clicking '$BUTTON_TEXT' button..."
                             adb shell input tap $TAP_X $TAP_Y
                             sleep 2
@@ -643,13 +641,20 @@ stages:
               echo "📁 Creating screenshots directory..."
               mkdir -p playstore_screenshots
               
-              # Take a screenshot for debugging
+              # Take a screenshot for debugging - use fallback methods if screencap fails
               echo "📸 Capturing screen after Play Store opens..."
-              adb shell screencap -p /sdcard/playstore_initial.png 2>/dev/null
-              if adb pull /sdcard/playstore_initial.png playstore_screenshots/01_playstore_opened.png 2>/dev/null; then
-                echo "✅ Screenshot saved: playstore_screenshots/01_playstore_opened.png"
+              
+              # Try multiple screenshot methods
+              if adb shell screencap -p /sdcard/playstore_initial.png 2>/dev/null; then
+                if adb pull /sdcard/playstore_initial.png playstore_screenshots/01_playstore_opened.png 2>/dev/null; then
+                  echo "✅ Screenshot saved: playstore_screenshots/01_playstore_opened.png"
+                else
+                  echo "⚠️  Failed to pull screenshot from device"
+                fi
               else
-                echo "⚠️  Failed to capture screenshot"
+                echo "⚠️  Screencap command failed - emulator may be unstable"
+                # Create a placeholder file so we know this step ran
+                echo "Screenshot capture failed at $(date)" > playstore_screenshots/01_screenshot_failed.txt
               fi
               
               # Dump UI and save to file for inspection
@@ -1018,6 +1023,65 @@ stages:
                 grep -i "install\|open\|download\|error\|unavailable\|failed" /tmp/ui_progress.xml | grep "text=" | grep -v 'text=""' | head -15 || echo "No relevant UI elements found"
                 echo "=================="
               fi
+              
+              # Create a comprehensive debug report
+              echo ""
+              echo "📝 Creating debug report..."
+              cat > playstore_screenshots/DEBUG_REPORT.txt << EOF
+=================================================================
+PLAY STORE INSTALLATION DEBUG REPORT
+Generated: $(date)
+=================================================================
+
+SUMMARY:
+--------
+Installation Status: FAILED
+Play Store Opened: $PLAY_STORE_OPEN
+App Found in Store: $APP_FOUND_IN_STORE
+Error Dialog Count: $ERROR_DIALOG_COUNT
+Time Elapsed: $ELAPSED seconds
+
+PACKAGE INFORMATION:
+-------------------
+Target Package: $PACKAGE_NAME
+App Name: Eptura Engage / Condeco
+
+UI ANALYSIS:
+-----------
+EOF
+              
+              if [ -f /tmp/ui_dump.xml ]; then
+                echo "Initial UI Dump:" >> playstore_screenshots/DEBUG_REPORT.txt
+                if grep -qi "Eptura\|Condeco" /tmp/ui_dump.xml; then
+                  echo "✅ App name found in initial UI" >> playstore_screenshots/DEBUG_REPORT.txt
+                  grep -i "Eptura\|Condeco" /tmp/ui_dump.xml | grep "text=" | head -3 >> playstore_screenshots/DEBUG_REPORT.txt
+                else
+                  echo "❌ App name NOT found in initial UI" >> playstore_screenshots/DEBUG_REPORT.txt
+                fi
+                echo "" >> playstore_screenshots/DEBUG_REPORT.txt
+                
+                if grep -qi "install" /tmp/ui_dump.xml; then
+                  echo "✅ Install button found:" >> playstore_screenshots/DEBUG_REPORT.txt
+                  grep -i "install" /tmp/ui_dump.xml | grep "text=" | head -3 >> playstore_screenshots/DEBUG_REPORT.txt
+                else
+                  echo "❌ Install button NOT found" >> playstore_screenshots/DEBUG_REPORT.txt
+                fi
+                echo "" >> playstore_screenshots/DEBUG_REPORT.txt
+              fi
+              
+              echo "SCREENSHOTS CAPTURED:" >> playstore_screenshots/DEBUG_REPORT.txt
+              ls -lh playstore_screenshots/ >> playstore_screenshots/DEBUG_REPORT.txt
+              echo "" >> playstore_screenshots/DEBUG_REPORT.txt
+              
+              echo "RECOMMENDATIONS:" >> playstore_screenshots/DEBUG_REPORT.txt
+              echo "1. Check the XML files to see the exact UI hierarchy" >> playstore_screenshots/DEBUG_REPORT.txt
+              echo "2. Verify if 'Eptura Engage' or 'Condeco' appears in the UI dumps" >> playstore_screenshots/DEBUG_REPORT.txt
+              echo "3. If app not found: The app may not be available in this region/device" >> playstore_screenshots/DEBUG_REPORT.txt
+              echo "4. BEST SOLUTION: Add APK file directly to repository" >> playstore_screenshots/DEBUG_REPORT.txt
+              echo "" >> playstore_screenshots/DEBUG_REPORT.txt
+              echo "=================================================================" >> playstore_screenshots/DEBUG_REPORT.txt
+              
+              echo "✅ Debug report saved to: playstore_screenshots/DEBUG_REPORT.txt"
               
               echo ""
               echo "❌ PLAY STORE AUTOMATION FAILED"
