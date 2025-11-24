@@ -1092,28 +1092,28 @@ stages:
               # Create a comprehensive debug report
               echo ""
               echo "📝 Creating debug report..."
-              cat > playstore_screenshots/DEBUG_REPORT.txt << 'EOF'
-=================================================================
-PLAY STORE INSTALLATION DEBUG REPORT
-Generated: $(date)
-=================================================================
-
-SUMMARY:
---------
-Installation Status: FAILED
-Play Store Opened: $PLAY_STORE_OPEN
-App Found in Store: $APP_FOUND_IN_STORE
-Error Dialog Count: $ERROR_DIALOG_COUNT
-Time Elapsed: $ELAPSED seconds
-
-PACKAGE INFORMATION:
--------------------
-Target Package: $PACKAGE_NAME
-App Name: Eptura Engage / Condeco
-
-UI ANALYSIS:
------------
-EOF
+              {
+                echo "================================================================="
+                echo "PLAY STORE INSTALLATION DEBUG REPORT"
+                echo "Generated: $(date)"
+                echo "================================================================="
+                echo ""
+                echo "SUMMARY:"
+                echo "--------"
+                echo "Installation Status: FAILED"
+                echo "Play Store Opened: $PLAY_STORE_OPEN"
+                echo "App Found in Store: $APP_FOUND_IN_STORE"
+                echo "Error Dialog Count: $ERROR_DIALOG_COUNT"
+                echo "Time Elapsed: $ELAPSED seconds"
+                echo ""
+                echo "PACKAGE INFORMATION:"
+                echo "-------------------"
+                echo "Target Package: $PACKAGE_NAME"
+                echo "App Name: Eptura Engage / Condeco"
+                echo ""
+                echo "UI ANALYSIS:"
+                echo "-----------"
+              } > playstore_screenshots/DEBUG_REPORT.txt
               
               if [ -f /tmp/ui_dump.xml ]; then
                 echo "Initial UI Dump:" >> playstore_screenshots/DEBUG_REPORT.txt
