@@ -127,7 +127,7 @@ stages:
               
               # Set Android environment variables
               export ANDROID_HOME=$ANDROID_SDK_ROOT
-              export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
+              export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin
               
               echo "ANDROID_HOME: $ANDROID_HOME"
               echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
@@ -141,6 +141,31 @@ stages:
               echo "📋 Android SDK structure:"
               ls -la $ANDROID_HOME/ || true
               
+              # Set up ADB path - critical for Windows Git Bash
+              echo "🔍 Setting up ADB..."
+              if [ -f "$ANDROID_HOME/platform-tools/adb.exe" ]; then
+                ADB="$ANDROID_HOME/platform-tools/adb.exe"
+              elif [ -f "$ANDROID_HOME/platform-tools/adb" ]; then
+                ADB="$ANDROID_HOME/platform-tools/adb"
+              else
+                echo "❌ ADB not found in platform-tools"
+                ls -la "$ANDROID_HOME/platform-tools/" || echo "platform-tools directory not found"
+                exit 1
+              fi
+              echo "✅ ADB found at: $ADB"
+              "$ADB" version || echo "ADB test failed"
+              
+              # Set up Emulator path
+              if [ -f "$ANDROID_HOME/emulator/emulator.exe" ]; then
+                EMULATOR="$ANDROID_HOME/emulator/emulator.exe"
+              elif [ -f "$ANDROID_HOME/emulator/emulator" ]; then
+                EMULATOR="$ANDROID_HOME/emulator/emulator"
+              else
+                echo "❌ Emulator not found"
+                exit 1
+              fi
+              echo "✅ Emulator found at: $EMULATOR"
+              
               # Find sdkmanager - Windows uses .bat extension
               echo "🔍 Searching for sdkmanager..."
               SDKMANAGER=""
@@ -148,53 +173,25 @@ stages:
               # Check common locations for Windows (.bat files) and Unix
               if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat" ]; then
                 SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat"
-                export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
-                echo "✅ Found sdkmanager at: $SDKMANAGER"
               elif [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
                 SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-                export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
-                echo "✅ Found sdkmanager at: $SDKMANAGER"
-              elif [ -f "$ANDROID_HOME/cmdline-tools/bin/sdkmanager.bat" ]; then
-                SDKMANAGER="$ANDROID_HOME/cmdline-tools/bin/sdkmanager.bat"
-                export PATH=$PATH:$ANDROID_HOME/cmdline-tools/bin
-                echo "✅ Found sdkmanager at: $SDKMANAGER"
-              elif [ -f "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" ]; then
-                SDKMANAGER="$ANDROID_HOME/cmdline-tools/bin/sdkmanager"
-                export PATH=$PATH:$ANDROID_HOME/cmdline-tools/bin
-                echo "✅ Found sdkmanager at: $SDKMANAGER"
               else
-                # Search for both .bat and regular versions
-                echo "Searching in cmdline-tools directory..."
-                find "$ANDROID_HOME/cmdline-tools" -name "sdkmanager.bat" -o -name "sdkmanager" -type f 2>/dev/null || true
-                
                 FOUND_SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \( -name "sdkmanager.bat" -o -name "sdkmanager" \) -type f 2>/dev/null | head -1)
                 if [ -n "$FOUND_SDKMANAGER" ]; then
                   SDKMANAGER="$FOUND_SDKMANAGER"
-                  SDKMANAGER_DIR=$(dirname "$FOUND_SDKMANAGER")
-                  export PATH=$PATH:$SDKMANAGER_DIR
-                  echo "✅ Found sdkmanager at: $SDKMANAGER"
                 else
                   echo "❌ sdkmanager not found in cmdline-tools"
-                  echo "Available cmdline-tools structure:"
-                  ls -laR "$ANDROID_HOME/cmdline-tools" 2>/dev/null || echo "cmdline-tools directory not found"
                   exit 1
                 fi
               fi
               
-              # Test sdkmanager works
-              echo "Testing sdkmanager..."
-              "$SDKMANAGER" --version || {
-                echo "❌ sdkmanager test failed"
-                exit 1
-              }
+              echo "✅ Found sdkmanager at: $SDKMANAGER"
+              "$SDKMANAGER" --version || { echo "❌ sdkmanager test failed"; exit 1; }
               
-              # Accept all licenses - use a more robust method
+              # Accept all licenses
               echo "📝 Accepting Android SDK licenses..."
-              # Create licenses directory if it doesn't exist
               mkdir -p "$ANDROID_HOME/licenses"
               
-              # Accept all known Android SDK licenses by creating license files
-              # These are the current license hashes as of 2024
               echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
               echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
               echo "d975f751698a77b662f1254ddbeed3901e976f5a" > "$ANDROID_HOME/licenses/intel-android-extra-license"
@@ -202,32 +199,25 @@ stages:
               echo "e9acab5b5fbb560a72cfaecce8946896ff6aab9d" > "$ANDROID_HOME/licenses/mips-android-sysimage-license"
               echo "d56a98520377fecf01c9e79e689e9ba188a4558e" > "$ANDROID_HOME/licenses/android-googletv-license"
               echo "667f5ef1d0d6dbb3c1bb1dbe94f0c0c66f8c3ee5" > "$ANDROID_HOME/licenses/android-googlexr-license"
-              
-              # Accept the ARM DBT license with all known hashes
               echo "e6b7c2ab7fa2298c15165e9583d0acf0b04a2232" > "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license"
               echo "d56a98520377fecf01c9e79e689e9ba188a4558e" >> "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license"
               
               echo "✅ License files created successfully"
-              
-              # Verify licenses directory
               echo "📋 Licenses directory contents:"
-              ls -la "$ANDROID_HOME/licenses/" || echo "Licenses directory not found"
+              ls -la "$ANDROID_HOME/licenses/" || true
               cat "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license" 2>/dev/null && echo "ARM DBT license hashes verified"
               
               # Update SDK manager
               echo "🔄 Updating SDK manager..."
               "$SDKMANAGER" --update --sdk_root=$ANDROID_HOME || true
               
-              # Install SDK components with Google Play Store support
-              # Use 'yes' to automatically accept any interactive prompts
+              # Install SDK components
               echo "📦 Installing SDK components with Google Play Store..."
               echo "This may take a few minutes..."
               
-              # First, let's check what's available
               echo "🔍 Checking available system images..."
               "$SDKMANAGER" --list --sdk_root=$ANDROID_HOME | grep "system-images;android-35" || echo "Searching for Android 35 images..."
               
-              # Install components one by one for better error tracking
               echo ""
               echo "📥 Installing platform-tools..."
               yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "platform-tools" || echo "⚠️  platform-tools may already be installed"
@@ -251,27 +241,20 @@ stages:
               echo "📥 Installing system image with Google Play Store for Android 35..."
               echo "This is the critical component - may take 5-10 minutes to download..."
               
-              # Try to install the system image with detailed output
               if yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME --verbose "system-images;android-35;google_apis_playstore;x86_64" 2>&1 | tee /tmp/system_image_install.log; then
                 echo "✅ System image installation command completed"
               else
                 echo "❌ System image installation command failed"
-                echo "Checking installation log..."
                 cat /tmp/system_image_install.log | tail -20
                 
-                # Try alternative: Android 34 with Google Play Store
                 echo ""
                 echo "⚠️  Android 35 system image may not be available yet"
                 echo "📥 Trying Android 34 with Google Play Store as fallback..."
                 if yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-34;google_apis_playstore;x86_64"; then
                   echo "✅ Android 34 system image installed as fallback"
-                  # Update variable for later use
                   echo "##vso[task.setvariable variable=ANDROID_API_LEVEL]34"
                 else
                   echo "❌ Failed to install any system image with Google Play Store"
-                  echo ""
-                  echo "Available system images:"
-                  "$SDKMANAGER" --list --sdk_root=$ANDROID_HOME | grep -A 50 "Available Packages:" | grep "system-images" | head -20
                   exit 1
                 fi
               fi
@@ -279,14 +262,13 @@ stages:
               echo ""
               echo "✅ SDK components installation completed"
               
-              # Wait for installation to complete and verify
+              # Wait for installation to complete
               echo "⏳ Waiting for files to be written to disk..."
               sleep 10
               
               # Verify system image was installed
               echo "🔍 Verifying system image installation..."
               
-              # Check for Android 35 first
               if [ -d "$ANDROID_HOME/system-images/android-35/google_apis_playstore/x86_64" ]; then
                 echo "✅ Android 35 Google Play system image found!"
                 ls -la "$ANDROID_HOME/system-images/android-35/google_apis_playstore/x86_64"
@@ -302,36 +284,25 @@ stages:
                 echo ""
                 echo "Contents of system-images directory:"
                 if [ -d "$ANDROID_HOME/system-images" ]; then
-                  echo "📁 System images directory exists:"
                   find $ANDROID_HOME/system-images -type d -maxdepth 3
                 else
-                  echo "❌ system-images directory does not exist at: $ANDROID_HOME/system-images"
+                  echo "❌ system-images directory does not exist"
                 fi
-                echo ""
-                echo "📋 List of installed packages:"
-                "$SDKMANAGER" --list_installed --sdk_root=$ANDROID_HOME
                 exit 1
               fi
               
-              # Store the system image path for later use
+              # Store variables for later use
               echo "##vso[task.setvariable variable=SYSTEM_IMAGE_PATH]$SYSTEM_IMAGE_PATH"
               echo "##vso[task.setvariable variable=ANDROID_API_LEVEL]$ANDROID_API_LEVEL"
+              echo "##vso[task.setvariable variable=ADB_PATH]$ADB"
+              echo "##vso[task.setvariable variable=EMULATOR_PATH]$EMULATOR"
               
-              # Verify ADB
-              echo "🔧 Verifying ADB..."
-              adb version
-              
-              # Find avdmanager - Windows uses .bat extension
+              # Find avdmanager
               echo "🔍 Searching for avdmanager..."
-              AVDMANAGER=""
               if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager.bat" ]; then
                 AVDMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager.bat"
               elif [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" ]; then
                 AVDMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
-              elif [ -f "$ANDROID_HOME/cmdline-tools/bin/avdmanager.bat" ]; then
-                AVDMANAGER="$ANDROID_HOME/cmdline-tools/bin/avdmanager.bat"
-              elif [ -f "$ANDROID_HOME/cmdline-tools/bin/avdmanager" ]; then
-                AVDMANAGER="$ANDROID_HOME/cmdline-tools/bin/avdmanager"
               else
                 FOUND_AVDMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \( -name "avdmanager.bat" -o -name "avdmanager" \) -type f 2>/dev/null | head -1)
                 if [ -n "$FOUND_AVDMANAGER" ]; then
@@ -343,9 +314,9 @@ stages:
               fi
               echo "✅ Found avdmanager at: $AVDMANAGER"
               
-              # List all installed system images
+              # List installed system images
               echo "📋 Installed system images:"
-              "$SDKMANAGER" --list_installed --sdk_root=$ANDROID_HOME | grep system-images || echo "No system images found in installed list"
+              "$SDKMANAGER" --list_installed --sdk_root=$ANDROID_HOME | grep system-images || echo "No system images found"
               
               echo ""
               echo "📱 Creating Android Emulator with Google Play Store..."
@@ -355,7 +326,7 @@ stages:
               # Delete existing emulator if present
               "$AVDMANAGER" delete avd -n $(emulatorName) 2>/dev/null || true
               
-              # Create new emulator with Google Play using the detected system image
+              # Create new emulator
               echo "Creating emulator with Google Play Store support..."
               echo "no" | "$AVDMANAGER" create avd \
                 --force \
@@ -363,31 +334,24 @@ stages:
                 --package "$SYSTEM_IMAGE_PATH" \
                 --device "pixel_4" \
                 --abi x86_64 || {
-                echo "❌ Failed to create emulator with $SYSTEM_IMAGE_PATH"
-                echo "Available packages:"
-                "$AVDMANAGER" list target
-                echo ""
-                echo "Available system images:"
-                "$SDKMANAGER" --list_installed --sdk_root=$ANDROID_HOME | grep system-images
+                echo "❌ Failed to create emulator"
                 exit 1
               }
               
               # Verify emulator was created
               echo "🔍 Verifying emulator creation..."
-              $ANDROID_HOME/emulator/emulator -list-avds
+              "$EMULATOR" -list-avds
               
-              if $ANDROID_HOME/emulator/emulator -list-avds | grep -q "$(emulatorName)"; then
+              if "$EMULATOR" -list-avds | grep -q "$(emulatorName)"; then
                 echo "✅ Emulator '$(emulatorName)' created successfully"
               else
                 echo "❌ Failed to create emulator"
-                echo "Available AVDs:"
-                $ANDROID_HOME/emulator/emulator -list-avds
                 exit 1
               fi
               
               # Start emulator with optimized settings
               echo "🚀 Starting emulator with optimized settings..."
-              nohup $ANDROID_HOME/emulator/emulator -avd $(emulatorName) \
+              nohup "$EMULATOR" -avd $(emulatorName) \
                 -no-snapshot-save \
                 -no-window \
                 -no-audio \
@@ -403,22 +367,23 @@ stages:
               echo "Emulator PID: $EMULATOR_PID"
               echo "##vso[task.setvariable variable=EMULATOR_PID]$EMULATOR_PID"
               
-              # Wait for device to be detected
+              # Wait for device to be detected - USE $ADB VARIABLE
               echo "⏳ Waiting for emulator device to be detected..."
               
-              # Use timeout to prevent hanging indefinitely
               WAIT_COUNT=0
               MAX_WAIT=60
-              until adb devices | grep -q "emulator.*device"; do
+              until "$ADB" devices | grep -q "emulator.*device"; do
                 if [ $WAIT_COUNT -ge $MAX_WAIT ]; then
                   echo "❌ Emulator device not detected after $MAX_WAIT seconds"
                   echo "Checking emulator process:"
-                  # Cross-platform process check
                   if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
                     tasklist | grep -i emulator || echo "Emulator process not found"
                   else
                     ps aux | grep emulator | grep -v grep || echo "Emulator process not found"
                   fi
+                  echo ""
+                  echo "=== Emulator Log ==="
+                  cat emulator.log
                   exit 1
                 fi
                 sleep 1
@@ -429,12 +394,13 @@ stages:
               done
               
               echo "✅ Device detected"
+              "$ADB" devices
               
-              # Wait for boot completion with reasonable timeout
+              # Wait for boot completion - USE $ADB VARIABLE
               echo "⏳ Waiting for boot_completed flag..."
               timeout=180
               elapsed=0
-              until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; do
+              until [[ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; do
                 if [ $elapsed -ge $timeout ]; then
                   echo "❌ Boot timeout after $timeout seconds"
                   echo "=== Emulator Log (last 100 lines) ==="
@@ -450,7 +416,7 @@ stages:
               
               echo "✅ Boot completed flag set!"
               
-              # Optimized service readiness check with faster polling
+              # Check services - USE $ADB VARIABLE
               echo "⏳ Waiting for Android system services (max 30 seconds)..."
               
               service_ready=false
@@ -458,15 +424,14 @@ stages:
               elapsed=0
               
               while [ $elapsed -lt $max_wait ]; do
-                # Check all services in one go
                 pm_ready=false
                 am_ready=false
                 
-                if adb shell pm list packages >/dev/null 2>&1; then
+                if "$ADB" shell pm list packages >/dev/null 2>&1; then
                   pm_ready=true
                 fi
                 
-                if adb shell am get-config >/dev/null 2>&1; then
+                if "$ADB" shell am get-config >/dev/null 2>&1; then
                   am_ready=true
                 fi
                 
@@ -489,8 +454,8 @@ stages:
               if [ "$service_ready" = false ]; then
                 echo "⚠️  Services not ready after $max_wait seconds, but continuing..."
                 echo "Attempting to check emulator state:"
-                adb shell getprop sys.boot_completed
-                adb shell pm list packages | head -5
+                "$ADB" shell getprop sys.boot_completed
+                "$ADB" shell pm list packages | head -5
               fi
               
               # Reduced stability wait
@@ -507,7 +472,7 @@ stages:
               adb_shell_ready=false
               for attempt in {1..5}; do
                 echo "  Attempt $attempt/5: Testing ADB shell..."
-                if timeout 5 adb shell echo "test" > /dev/null 2>&1; then
+                if timeout 5 "$ADB" shell echo "test" > /dev/null 2>&1; then
                   echo "✅ ADB shell connection established (attempt $attempt)"
                   adb_shell_ready=true
                   break
@@ -526,7 +491,7 @@ stages:
               pm_verified=false
               for i in {1..3}; do
                 echo "  Attempt $i/3: Checking package manager..."
-                if adb shell pm list packages > /dev/null 2>&1; then
+                if "$ADB" shell pm list packages > /dev/null 2>&1; then
                   pm_verified=true
                   echo "✅ Package manager verified"
                   break
@@ -543,12 +508,12 @@ stages:
               # Verify emulator is ready
               echo ""
               echo "📱 Emulator status:"
-              adb devices -l
+              "$ADB" devices -l
               
               # Try to get Android version with retry
               android_version="unknown"
               for i in {1..3}; do
-                android_version=$(adb shell getprop ro.build.version.release 2>/dev/null | tr -d '\r\n')
+                android_version=$("$ADB" shell getprop ro.build.version.release 2>/dev/null | tr -d '\r\n')
                 if [ -n "$android_version" ]; then
                   break
                 fi
@@ -559,7 +524,7 @@ stages:
               # Try to get API level with retry
               api_level="unknown"
               for i in {1..3}; do
-                api_level=$(adb shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r\n')
+                api_level=$("$ADB" shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r\n')
                 if [ -n "$api_level" ]; then
                   break
                 fi
@@ -572,10 +537,10 @@ stages:
               echo "🔍 Checking for Google Play Store..."
               play_store_found=false
               for i in {1..3}; do
-                if adb shell pm list packages 2>/dev/null | grep -q "com.android.vending"; then
+                if "$ADB" shell pm list packages 2>/dev/null | grep -q "com.android.vending"; then
                   play_store_found=true
                   echo "✅ Google Play Store is present!"
-                  PLAY_STORE_VERSION=$(adb shell dumpsys package com.android.vending 2>/dev/null | grep versionName | head -1 | awk '{print $1}' || echo "version unknown")
+                  PLAY_STORE_VERSION=$("$ADB" shell dumpsys package com.android.vending 2>/dev/null | grep versionName | head -1 | awk '{print $1}' || echo "version unknown")
                   echo "Play Store: $PLAY_STORE_VERSION"
                   break
                 fi
@@ -586,11 +551,11 @@ stages:
               if [ "$play_store_found" = false ]; then
                 echo "⚠️  Google Play Store not found after multiple checks"
                 echo "📋 Checking Google services packages:"
-                adb shell pm list packages 2>/dev/null | grep -i google | head -10 || echo "Could not list packages"
+                "$ADB" shell pm list packages 2>/dev/null | grep -i google | head -10 || echo "Could not list packages"
               fi
               
               # Get emulator serial
-              EMULATOR_SERIAL=$(adb devices | grep "emulator" | head -1 | awk '{print $1}')
+              EMULATOR_SERIAL=$("$ADB" devices | grep "emulator" | head -1 | awk '{print $1}')
               echo ""
               echo "Emulator Serial: $EMULATOR_SERIAL"
               echo "##vso[task.setvariable variable=EMULATOR_SERIAL]$EMULATOR_SERIAL"
@@ -654,13 +619,16 @@ stages:
               echo "📲 Installing Eptura Engage App using Python automation script..."
               echo "======================================================="
               
+              # Get ADB path from environment variable
+              ADB="${ADB_PATH:-adb}"
+              
               # Define package name
               PACKAGE_NAME="com.condecosoftware.condeco"
               
               # Check if app is already installed
-              if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
+              if "$ADB" shell pm list packages | grep -q "$PACKAGE_NAME"; then
                 echo "✅ App is already installed!"
-                APP_INFO=$(adb shell dumpsys package $PACKAGE_NAME | grep -E "versionName|versionCode" | head -2)
+                APP_INFO=$("$ADB" shell dumpsys package $PACKAGE_NAME | grep -E "versionName|versionCode" | head -2)
                 echo "App info:"
                 echo "$APP_INFO"
                 exit 0
@@ -675,7 +643,7 @@ stages:
                 echo "✅ Found APK file: $APK_PATH"
                 echo "📥 Installing APK..."
                 
-                adb install -r "$APK_PATH"
+                "$ADB" install -r "$APK_PATH"
                 
                 if [ $? -eq 0 ]; then
                   echo "✅ APK installed successfully!"
@@ -750,9 +718,9 @@ stages:
                 echo "✅ Play Store installation completed successfully!"
                 
                 # Verify installation
-                if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
+                if "$ADB" shell pm list packages | grep -q "$PACKAGE_NAME"; then
                   echo "✅ App package verified: $PACKAGE_NAME"
-                  APP_INFO=$(adb shell dumpsys package $PACKAGE_NAME | grep -E "versionName|versionCode" | head -2)
+                  APP_INFO=$("$ADB" shell dumpsys package $PACKAGE_NAME | grep -E "versionName|versionCode" | head -2)
                   echo "App details:"
                   echo "$APP_INFO"
                   exit 0
@@ -824,7 +792,11 @@ stages:
 
           - bash: |
               echo "🧹 Cleanup: Stopping Emulator..."
-              adb emu kill || true
+              
+              # Get ADB path from environment variable
+              ADB="${ADB_PATH:-adb}"
+              
+              "$ADB" emu kill || true
               
               # Cross-platform emulator cleanup
               if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
