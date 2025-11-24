@@ -639,9 +639,18 @@ stages:
               # Dismiss any error dialogs that appeared
               dismiss_error_dialogs
               
+              # Create screenshots directory for artifacts
+              echo "📁 Creating screenshots directory..."
+              mkdir -p playstore_screenshots
+              
               # Take a screenshot for debugging
-              echo "📸 Capturing screen for debugging..."
-              adb shell screencap -p /sdcard/playstore_screen.png 2>/dev/null || true
+              echo "📸 Capturing screen after Play Store opens..."
+              adb shell screencap -p /sdcard/playstore_initial.png 2>/dev/null
+              if adb pull /sdcard/playstore_initial.png playstore_screenshots/01_playstore_opened.png 2>/dev/null; then
+                echo "✅ Screenshot saved: playstore_screenshots/01_playstore_opened.png"
+              else
+                echo "⚠️  Failed to capture screenshot"
+              fi
               
               # Dump UI and save to file for inspection
               echo "📋 Dumping UI hierarchy for analysis..."
@@ -650,12 +659,35 @@ stages:
               
               # Check if we're actually on the Play Store page
               PLAY_STORE_OPEN=false
+              APP_FOUND_IN_STORE=false
+              
               if adb pull /sdcard/window_dump.xml /tmp/ui_dump.xml 2>/dev/null; then
+                # Save UI dump to artifacts
+                cp /tmp/ui_dump.xml playstore_screenshots/01_ui_dump_initial.xml
+                
                 if grep -q "com.android.vending" /tmp/ui_dump.xml; then
                   PLAY_STORE_OPEN=true
                   echo "✅ Play Store page is open"
                 else
                   echo "⚠️  Play Store may not have opened correctly"
+                fi
+                
+                # Check if Eptura Engage app is displayed
+                if grep -qi "Eptura Engage\|eptura\|Condeco" /tmp/ui_dump.xml; then
+                  APP_FOUND_IN_STORE=true
+                  echo "✅ Eptura Engage app found in Play Store!"
+                  echo ""
+                  echo "📱 App information found in UI:"
+                  grep -i "Eptura\|Condeco" /tmp/ui_dump.xml | grep "text=" | head -5
+                else
+                  echo "⚠️  Eptura Engage app name not found in UI"
+                  echo "Searching for app package name..."
+                  if grep -q "com.condecosoftware.condeco" /tmp/ui_dump.xml; then
+                    echo "✅ App package ID found in Play Store"
+                    APP_FOUND_IN_STORE=true
+                  else
+                    echo "❌ App not found by package name either"
+                  fi
                 fi
                 
                 echo ""
@@ -671,12 +703,19 @@ stages:
                   grep -i "open" /tmp/ui_dump.xml | grep "text=" | head -3
                 elif grep -iq "update" /tmp/ui_dump.xml; then
                   echo "⚠️  Found 'Update' button - an older version might be installed"
+                  grep -i "update" /tmp/ui_dump.xml | grep "text=" | head -3
                 elif grep -iq "isn't responding\|not responding\|has stopped" /tmp/ui_dump.xml; then
                   echo "❌ ERROR: System error dialog detected!"
                   grep -i "isn't responding\|not responding\|has stopped" /tmp/ui_dump.xml | head -3
+                  
+                  # Take screenshot of error
+                  echo "📸 Capturing error dialog screenshot..."
+                  adb shell screencap -p /sdcard/error_dialog.png 2>/dev/null
+                  adb pull /sdcard/error_dialog.png playstore_screenshots/error_dialog.png 2>/dev/null
+                  
                   echo ""
-                  echo "The emulator has stability issues. Showing full UI dump:"
-                  cat /tmp/ui_dump.xml
+                  echo "The emulator has stability issues."
+                  echo "📁 Screenshots and UI dumps saved to artifacts for analysis"
                   echo ""
                   echo "❌ CRITICAL: Cannot proceed with Play Store installation due to system errors"
                   echo ""
@@ -700,7 +739,14 @@ stages:
                   echo "Showing clickable elements with text:"
                   grep -i "clickable=\"true\"" /tmp/ui_dump.xml | grep "text=" | grep -v 'text=""' | head -10
                 fi
+                
+                # Show summary
                 echo "========================"
+                echo ""
+                echo "📊 Play Store Status Summary:"
+                echo "  • Play Store Open: $([ "$PLAY_STORE_OPEN" = true ] && echo "✅ Yes" || echo "❌ No")"
+                echo "  • App Found in Store: $([ "$APP_FOUND_IN_STORE" = true ] && echo "✅ Yes" || echo "❌ No")"
+                echo "  • Screenshots saved to: playstore_screenshots/"
                 echo ""
               fi
               
@@ -708,6 +754,54 @@ stages:
               if grep -q "isn't responding\|not responding\|has stopped" /tmp/ui_dump.xml 2>/dev/null; then
                 echo "❌ Cannot continue - system errors present"
                 exit 1
+              fi
+              
+              # Scroll down to ensure Install button is visible if app is found but button isn't
+              if [ "$APP_FOUND_IN_STORE" = true ]; then
+                echo "🔍 App found in store, attempting to scroll to Install button..."
+                adb shell input swipe 500 1000 500 400 500
+                sleep 2
+                
+                # Take another screenshot after scrolling
+                echo "📸 Capturing screen after scroll..."
+                adb shell screencap -p /sdcard/playstore_scrolled.png 2>/dev/null
+                adb pull /sdcard/playstore_scrolled.png playstore_screenshots/02_after_scroll.png 2>/dev/null
+                
+                # Dump UI again
+                adb shell uiautomator dump /sdcard/window_dump_scrolled.xml 2>/dev/null
+                adb pull /sdcard/window_dump_scrolled.xml playstore_screenshots/02_ui_dump_scrolled.xml 2>/dev/null
+                
+                # Check again for Install button
+                if adb pull /sdcard/window_dump_scrolled.xml /tmp/ui_dump_scrolled.xml 2>/dev/null; then
+                  if grep -iq "install" /tmp/ui_dump_scrolled.xml; then
+                    echo "✅ Install button now visible after scrolling!"
+                    grep -i "install" /tmp/ui_dump_scrolled.xml | grep "text=" | head -3
+                  fi
+                fi
+              fi
+              
+              # If Install button still not found, try keyboard navigation
+              echo ""
+              echo "⌨️ Attempting keyboard navigation to Install button..."
+              for i in {1..3}; do
+                adb shell input keyevent KEYCODE_TAB
+                sleep 0.5
+              done
+              adb shell input keyevent KEYCODE_ENTER
+              sleep 3
+              
+              # Final check for Install button visibility
+              echo "🔍 Final check for Install button..."
+              adb shell uiautomator dump /sdcard/window_dump_final.xml 2>/dev/null
+              adb pull /sdcard/window_dump_final.xml playstore_screenshots/03_ui_dump_final.xml 2>/dev/null
+              
+              if adb pull /sdcard/window_dump_final.xml /tmp/ui_dump_final.xml 2>/dev/null; then
+                if grep -iq "install" /tmp/ui_dump_final.xml; then
+                  echo "✅ Install button is visible - proceeding with installation"
+                  grep -i "install" /tmp/ui_dump_final.xml | grep "text=" | head -3
+                else
+                  echo "⚠️  Install button still not found - installation may not proceed"
+                fi
               fi
               
               echo ""
@@ -748,9 +842,15 @@ stages:
                       echo "  ✅ Tapped! Waiting 5 seconds..."
                       sleep 5
                       
+                      # Capture screenshot after clicking Install
+                      echo "📸 Capturing screen after clicking Install..."
+                      adb shell screencap -p /sdcard/after_install_click.png 2>/dev/null
+                      adb pull /sdcard/after_install_click.png playstore_screenshots/04_after_install_click.png 2>/dev/null
+                      
                       # Check if installation started
                       adb shell uiautomator dump /sdcard/window_dump2.xml 2>/dev/null
                       if adb pull /sdcard/window_dump2.xml /tmp/ui_dump2.xml 2>/dev/null; then
+                        cp /tmp/ui_dump2.xml playstore_screenshots/04_ui_dump_after_click.xml
                         if grep -qi "downloading\|installing\|pending\|cancel" /tmp/ui_dump2.xml; then
                           echo "  ✅ Installation appears to have started!"
                           break
@@ -764,26 +864,12 @@ stages:
                 done
               fi
               
-              # If Install button not found or clicked, try alternative methods
-              if [ "$INSTALL_FOUND" = false ]; then
-                echo ""
-                echo "  ⚠️  Could not automatically click Install button"
-                echo "  📱 Trying keyboard navigation..."
-                
-                # Try tab navigation and enter
-                for i in {1..3}; do
-                  adb shell input keyevent KEYCODE_TAB
-                  sleep 0.5
-                done
-                adb shell input keyevent KEYCODE_ENTER
-                sleep 3
-              fi
-              
               # Check for and handle account selection or permission dialogs
               echo ""
               echo "🔍 Checking for account selection or permission dialogs..."
               adb shell uiautomator dump /sdcard/window_dump3.xml 2>/dev/null
               if adb pull /sdcard/window_dump3.xml /tmp/ui_dump3.xml 2>/dev/null; then
+                cp /tmp/ui_dump3.xml playstore_screenshots/05_ui_dump_dialogs.xml
                 for BUTTON_TEXT in "Continue" "CONTINUE" "Accept" "ACCEPT" "OK"; do
                   if grep -q "text=\"$BUTTON_TEXT\"" /tmp/ui_dump3.xml; then
                     BUTTON_LINE=$(grep "text=\"$BUTTON_TEXT\"" /tmp/ui_dump3.xml | grep "clickable=\"true\"" | head -1)
@@ -820,12 +906,18 @@ stages:
               ELAPSED=0
               CHECK_INTERVAL=10
               ERROR_DIALOG_COUNT=0
+              SCREENSHOT_COUNT=5
               
               while [ $ELAPSED -lt $MAX_WAIT ]; do
                 # Dismiss error dialogs
                 if dismiss_error_dialogs; then
                   ERROR_DIALOG_COUNT=$((ERROR_DIALOG_COUNT + 1))
                   echo "  ⚠️  Dismissed error dialog (count: $ERROR_DIALOG_COUNT)"
+                  
+                  # Capture screenshot of error
+                  SCREENSHOT_COUNT=$((SCREENSHOT_COUNT + 1))
+                  adb shell screencap -p /sdcard/error_${ERROR_DIALOG_COUNT}.png 2>/dev/null
+                  adb pull /sdcard/error_${ERROR_DIALOG_COUNT}.png playstore_screenshots/error_dialog_${ERROR_DIALOG_COUNT}.png 2>/dev/null
                   
                   # If too many errors, give up
                   if [ $ERROR_DIALOG_COUNT -ge 3 ]; then
@@ -848,6 +940,11 @@ stages:
                 if adb shell pm list packages 2>/dev/null | grep -q "$PACKAGE_NAME"; then
                   echo ""
                   echo "✅ App package detected in system!"
+                  
+                  # Capture success screenshot
+                  adb shell screencap -p /sdcard/install_success.png 2>/dev/null
+                  adb pull /sdcard/install_success.png playstore_screenshots/99_install_success.png 2>/dev/null
+                  
                   sleep 5
                   
                   # Verify it's actually installed
@@ -859,17 +956,25 @@ stages:
                     echo "📱 Installed app info:"
                     echo "$APP_INFO"
                     echo ""
+                    echo "📁 All screenshots saved to: playstore_screenshots/"
+                    echo ""
                     exit 0
                   fi
                 fi
                 
-                # Check UI state every 30 seconds
+                # Check UI state every 30 seconds and capture screenshots
                 if [ $((ELAPSED % 30)) -eq 0 ] && [ $ELAPSED -gt 0 ]; then
                   echo "  ⏳ Still waiting... ($ELAPSED seconds elapsed)"
+                  
+                  # Capture periodic screenshot
+                  SCREENSHOT_COUNT=$((SCREENSHOT_COUNT + 1))
+                  adb shell screencap -p /sdcard/progress_${ELAPSED}.png 2>/dev/null
+                  adb pull /sdcard/progress_${ELAPSED}.png playstore_screenshots/progress_${ELAPSED}s.png 2>/dev/null
                   
                   # Check UI for progress or errors
                   adb shell uiautomator dump /sdcard/window_dump_progress.xml 2>/dev/null
                   if adb pull /sdcard/window_dump_progress.xml /tmp/ui_progress.xml 2>/dev/null; then
+                    cp /tmp/ui_progress.xml playstore_screenshots/progress_${ELAPSED}s.xml
                     if grep -q 'text="Open"' /tmp/ui_progress.xml || grep -q 'text="OPEN"' /tmp/ui_progress.xml; then
                       echo "     ✅ 'Open' button detected - checking package manager..."
                     elif grep -qi "download\|install\|pending" /tmp/ui_progress.xml; then
@@ -892,12 +997,19 @@ stages:
               # Final check
               if adb shell pm list packages 2>/dev/null | grep -q "$PACKAGE_NAME"; then
                 echo "✅ App installed successfully!"
+                adb shell screencap -p /sdcard/final_success.png 2>/dev/null
+                adb pull /sdcard/final_success.png playstore_screenshots/99_final_success.png 2>/dev/null
+                echo "📁 All screenshots saved to: playstore_screenshots/"
                 exit 0
               fi
               
               echo ""
               echo "❌ Installation failed or timed out after $ELAPSED seconds"
               echo ""
+              
+              # Capture final state screenshot
+              adb shell screencap -p /sdcard/final_state.png 2>/dev/null
+              adb pull /sdcard/final_state.png playstore_screenshots/99_final_state.png 2>/dev/null
               
               # Show final state
               if [ -f /tmp/ui_progress.xml ]; then
@@ -924,9 +1036,19 @@ stages:
               echo "   • Use Azure Storage with SAS token to download APK"
               echo "   • Build APK from source in pipeline"
               echo ""
+              echo "📁 Screenshots and UI dumps saved to: playstore_screenshots/"
+              echo "   Check pipeline artifacts for detailed analysis"
+              echo ""
               exit 1
             displayName: 'Install App from Play Store'
             continueOnError: false
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Play Store Screenshots'
+            inputs:
+              PathtoPublish: '$(System.DefaultWorkingDirectory)/playstore_screenshots'
+              ArtifactName: 'playstore-debug-screenshots'
+            condition: always()
 
           - task: DownloadBuildArtifacts@1
             displayName: 'Download Build Artifacts'
