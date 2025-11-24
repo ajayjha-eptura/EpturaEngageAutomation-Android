@@ -377,8 +377,18 @@ stages:
               # Start emulator with optimized settings for x86_64 with software rendering
               echo ""
               echo "============================================================================"
-              echo "🚀 Starting x86_64 emulator with software rendering (no WHPX)..."
+              echo "🚀 Starting x86_64 emulator with software rendering (Windows optimized)..."
               echo "============================================================================"
+              
+              # Kill any existing ADB server and restart it to ensure clean state
+              echo "🔄 Restarting ADB server for clean state..."
+              "$ADB" kill-server || true
+              sleep 2
+              "$ADB" start-server
+              sleep 3
+              echo "✅ ADB server restarted"
+              
+              # Start emulator in background (remove conflicting KVM option for Windows)
               nohup "$EMULATOR" -avd $(emulatorName) \
                 -no-snapshot-save \
                 -no-window \
@@ -389,43 +399,125 @@ stages:
                 -memory 4096 \
                 -cores 2 \
                 -wipe-data \
-                -qemu -enable-kvm \
+                -verbose \
                 > emulator.log 2>&1 &
               
               EMULATOR_PID=$!
               echo "Emulator PID: $EMULATOR_PID"
               echo "##vso[task.setvariable variable=EMULATOR_PID]$EMULATOR_PID"
               
-              # Wait for device to be detected - USE $ADB VARIABLE
+              # Give emulator a moment to initialize before polling
+              echo "⏳ Waiting for emulator process to initialize..."
+              sleep 10
+              
+              # Verify emulator process is running
+              if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
+                if ! tasklist | grep -i "qemu-system" > /dev/null 2>&1; then
+                  echo "❌ Emulator process not running!"
+                  echo "=== Emulator Log ==="
+                  cat emulator.log
+                  exit 1
+                fi
+              else
+                if ! ps -p $EMULATOR_PID > /dev/null 2>&1; then
+                  echo "❌ Emulator process died!"
+                  echo "=== Emulator Log ==="
+                  cat emulator.log
+                  exit 1
+                fi
+              fi
+              echo "✅ Emulator process is running"
+              
+              # Wait for device to be detected with improved detection logic
               echo "⏳ Waiting for emulator device to be detected..."
               
               WAIT_COUNT=0
-              MAX_WAIT=90
-              until "$ADB" devices | grep -q "emulator.*device"; do
-                if [ $WAIT_COUNT -ge $MAX_WAIT ]; then
-                  echo "❌ Emulator device not detected after $MAX_WAIT seconds"
-                  echo "Checking emulator process:"
-                  if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
-                    tasklist | grep -i emulator || echo "Emulator process not found"
-                  else
-                    ps aux | grep emulator | grep -v grep || echo "Emulator process not found"
-                  fi
-                  echo ""
-                  echo "=== Emulator Log ==="
-                  cat emulator.log
-                  echo ""
-                  echo "❌ CRITICAL ERROR: Check that x86_64 system image was used!"
-                  exit 1
+              MAX_WAIT=120
+              DEVICE_DETECTED=false
+              
+              while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
+                # Refresh ADB devices list
+                "$ADB" devices > /tmp/adb_devices.txt 2>&1
+                
+                # Check for emulator device (offline or online)
+                if grep -q "emulator" /tmp/adb_devices.txt; then
+                  echo "✅ Emulator device detected in ADB!"
+                  cat /tmp/adb_devices.txt
+                  DEVICE_DETECTED=true
+                  break
                 fi
+                
                 sleep 1
                 WAIT_COUNT=$((WAIT_COUNT + 1))
+                
                 if [ $((WAIT_COUNT % 10)) -eq 0 ]; then
                   echo "  Still waiting for device... ($WAIT_COUNT/$MAX_WAIT seconds)"
+                  
+                  # Show current ADB devices every 30 seconds
+                  if [ $((WAIT_COUNT % 30)) -eq 0 ]; then
+                    echo "  Current ADB devices:"
+                    "$ADB" devices
+                    
+                    # Check emulator process status
+                    if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
+                      echo "  Emulator process status:"
+                      tasklist | grep -i "qemu-system" || echo "  ⚠️ Emulator process not found in tasklist"
+                    fi
+                    
+                    # Show last few lines of emulator log
+                    echo "  Emulator log (last 10 lines):"
+                    tail -10 emulator.log 2>/dev/null || echo "  No log available yet"
+                  fi
                 fi
               done
               
-              echo "✅ Device detected"
-              "$ADB" devices
+              if [ "$DEVICE_DETECTED" = false ]; then
+                echo "❌ Emulator device not detected after $MAX_WAIT seconds"
+                echo ""
+                echo "Current ADB devices:"
+                "$ADB" devices
+                echo ""
+                echo "Checking emulator process:"
+                if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
+                  tasklist | grep -i emulator || echo "Emulator process not found"
+                  tasklist | grep -i qemu || echo "QEMU process not found"
+                else
+                  ps aux | grep emulator | grep -v grep || echo "Emulator process not found"
+                fi
+                echo ""
+                echo "=== Emulator Log ==="
+                cat emulator.log
+                echo ""
+                echo "❌ TROUBLESHOOTING:"
+                echo "1. Emulator may have crashed during startup"
+                echo "2. ADB may not be detecting the emulator serial port"
+                echo "3. System image may be corrupted"
+                exit 1
+              fi
+              
+              # Now wait for device to come online (not just detected)
+              echo "⏳ Waiting for device to come online..."
+              ONLINE_WAIT=0
+              MAX_ONLINE_WAIT=120
+              
+              while [ $ONLINE_WAIT -lt $MAX_ONLINE_WAIT ]; do
+                if "$ADB" devices | grep "emulator.*device" > /dev/null 2>&1; then
+                  echo "✅ Device is online!"
+                  break
+                fi
+                
+                sleep 1
+                ONLINE_WAIT=$((ONLINE_WAIT + 1))
+                
+                if [ $((ONLINE_WAIT % 15)) -eq 0 ]; then
+                  echo "  Device status: $("$ADB" devices | grep emulator || echo 'offline or booting')"
+                fi
+              done
+              
+              if [ $ONLINE_WAIT -ge $MAX_ONLINE_WAIT ]; then
+                echo "⚠️ Device did not come online, but continuing..."
+                "$ADB" devices
+              fi
               
               # Wait for boot completion - USE $ADB VARIABLE
               echo "⏳ Waiting for boot_completed flag..."
