@@ -374,10 +374,10 @@ stages:
                 exit 1
               fi
               
-              # Start emulator with optimized settings for x86_64 with hardware acceleration
+              # Start emulator with optimized settings for x86_64 with software rendering
               echo ""
               echo "============================================================================"
-              echo "🚀 Starting x86_64 emulator with hardware acceleration..."
+              echo "🚀 Starting x86_64 emulator with software rendering (no WHPX)..."
               echo "============================================================================"
               nohup "$EMULATOR" -avd $(emulatorName) \
                 -no-snapshot-save \
@@ -385,10 +385,11 @@ stages:
                 -no-audio \
                 -no-boot-anim \
                 -gpu swiftshader_indirect \
-                -accel auto \
+                -accel off \
                 -memory 4096 \
                 -cores 2 \
                 -wipe-data \
+                -qemu -enable-kvm \
                 > emulator.log 2>&1 &
               
               EMULATOR_PID=$!
