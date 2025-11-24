@@ -123,7 +123,8 @@ stages:
             displayName: 'Install Python Dependencies'
 
           - bash: |
-              echo "📱 Configuring Android SDK with Google Play support..."
+              echo "📱 Configuring Android SDK with Google Play support for Windows x86_64..."
+              echo "============================================================================"
               
               # Set Android environment variables
               export ANDROID_HOME=$ANDROID_SDK_ROOT
@@ -131,6 +132,7 @@ stages:
               
               echo "ANDROID_HOME: $ANDROID_HOME"
               echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+              echo "Host Architecture: x86_64 (Windows)"
               
               # Verify Android SDK exists
               if [ ! -d "$ANDROID_HOME" ]; then
@@ -205,7 +207,6 @@ stages:
               echo "✅ License files created successfully"
               echo "📋 Licenses directory contents:"
               ls -la "$ANDROID_HOME/licenses/" || true
-              cat "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license" 2>/dev/null && echo "ARM DBT license hashes verified"
               
               # Update SDK manager
               echo "🔄 Updating SDK manager..."
@@ -213,84 +214,105 @@ stages:
               
               # Install SDK components
               echo "📦 Installing SDK components with Google Play Store..."
-              echo "This may take a few minutes..."
+              echo "============================================================================"
+              echo "⚠️  IMPORTANT: Using x86_64 architecture for Windows compatibility"
+              echo "============================================================================"
               
               echo "🔍 Checking available system images..."
-              "$SDKMANAGER" --list --sdk_root=$ANDROID_HOME | grep "system-images;android-35" || echo "Searching for Android 35 images..."
+              "$SDKMANAGER" --list --sdk_root=$ANDROID_HOME 2>&1 | grep "system-images;android-3[0-9];google_apis_playstore;x86_64" || echo "Searching for compatible images..."
               
               echo ""
               echo "📥 Installing platform-tools..."
-              yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "platform-tools" || echo "⚠️  platform-tools may already be installed"
-              
-              echo ""
-              echo "📥 Installing Android 35 platform..."
-              yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "platforms;android-35" || echo "⚠️  platforms;android-35 may already be installed"
-              
-              echo ""
-              echo "📥 Installing build-tools 35.0.1..."
-              yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "build-tools;35.0.1" || {
-                echo "⚠️  build-tools;35.0.1 not found, trying 35.0.0..."
-                yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "build-tools;35.0.0" || echo "Using existing build-tools"
-              }
+              echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "platform-tools" || echo "⚠️  platform-tools may already be installed"
               
               echo ""
               echo "📥 Installing emulator..."
-              yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "emulator" || echo "⚠️  emulator may already be installed"
+              echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "emulator" || echo "⚠️  emulator may already be installed"
               
               echo ""
-              echo "📥 Installing system image with Google Play Store for Android 35..."
-              echo "This is the critical component - may take 5-10 minutes to download..."
-              echo "⚠️  Using ARM64 system image (works without hardware acceleration on Windows)"
+              echo "📥 Installing Android 34 platform (stable)..."
+              echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "platforms;android-34" || echo "⚠️  platforms;android-34 may already be installed"
               
-              if yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME --verbose "system-images;android-35;google_apis_playstore;arm64-v8a" 2>&1 | tee /tmp/system_image_install.log; then
-                echo "✅ System image installation command completed"
-              else
-                echo "❌ System image installation command failed"
-                cat /tmp/system_image_install.log | tail -20
+              echo ""
+              echo "📥 Installing build-tools 34.0.0..."
+              echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "build-tools;34.0.0" || echo "⚠️  build-tools may already be installed"
+              
+              echo ""
+              echo "============================================================================"
+              echo "📥 Installing x86_64 system image with Google Play Store..."
+              echo "⚠️  This is CRITICAL - MUST be x86_64 for Windows hosts!"
+              echo "============================================================================"
+              
+              # Try Android 34 first (more stable)
+              SYSTEM_IMAGE_INSTALLED=false
+              SYSTEM_IMAGE_PATH=""
+              ANDROID_API_LEVEL=""
+              
+              echo "Attempting to install Android 34 Google Play x86_64 system image..."
+              if echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-34;google_apis_playstore;x86_64" 2>&1 | tee /tmp/system_image_install.log; then
+                echo "✅ System image installation command executed"
                 
-                echo ""
-                echo "⚠️  Android 35 system image may not be available yet"
-                echo "📥 Trying Android 34 with Google Play Store as fallback..."
-                if yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-34;google_apis_playstore;arm64-v8a"; then
-                  echo "✅ Android 34 system image installed as fallback"
-                  echo "##vso[task.setvariable variable=ANDROID_API_LEVEL]34"
-                else
-                  echo "❌ Failed to install any system image with Google Play Store"
-                  exit 1
+                # Wait for installation to complete
+                sleep 10
+                
+                # Verify installation
+                if [ -d "$ANDROID_HOME/system-images/android-34/google_apis_playstore/x86_64" ]; then
+                  echo "✅ Android 34 Google Play x86_64 system image verified!"
+                  SYSTEM_IMAGE_PATH="system-images;android-34;google_apis_playstore;x86_64"
+                  ANDROID_API_LEVEL=34
+                  SYSTEM_IMAGE_INSTALLED=true
                 fi
+              fi
+              
+              # Try Android 33 as fallback
+              if [ "$SYSTEM_IMAGE_INSTALLED" = false ]; then
+                echo ""
+                echo "⚠️  Android 34 not available, trying Android 33..."
+                if echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-33;google_apis_playstore;x86_64"; then
+                  sleep 10
+                  if [ -d "$ANDROID_HOME/system-images/android-33/google_apis_playstore/x86_64" ]; then
+                    echo "✅ Android 33 Google Play x86_64 system image verified!"
+                    SYSTEM_IMAGE_PATH="system-images;android-33;google_apis_playstore;x86_64"
+                    ANDROID_API_LEVEL=33
+                    SYSTEM_IMAGE_INSTALLED=true
+                  fi
+                fi
+              fi
+              
+              # Try Android 35 as last resort
+              if [ "$SYSTEM_IMAGE_INSTALLED" = false ]; then
+                echo ""
+                echo "⚠️  Trying Android 35..."
+                if echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-35;google_apis_playstore;x86_64"; then
+                  sleep 10
+                  if [ -d "$ANDROID_HOME/system-images/android-35/google_apis_playstore/x86_64" ]; then
+                    echo "✅ Android 35 Google Play x86_64 system image verified!"
+                    SYSTEM_IMAGE_PATH="system-images;android-35;google_apis_playstore;x86_64"
+                    ANDROID_API_LEVEL=35
+                    SYSTEM_IMAGE_INSTALLED=true
+                  fi
+                fi
+              fi
+              
+              if [ "$SYSTEM_IMAGE_INSTALLED" = false ]; then
+                echo "❌ Failed to install any x86_64 system image with Google Play Store"
+                echo ""
+                echo "Available system images:"
+                "$SDKMANAGER" --list --sdk_root=$ANDROID_HOME 2>&1 | grep google_apis_playstore || true
+                exit 1
               fi
               
               echo ""
               echo "✅ SDK components installation completed"
+              echo "System Image: $SYSTEM_IMAGE_PATH"
+              echo "API Level: $ANDROID_API_LEVEL"
               
-              # Wait for installation to complete
-              echo "⏳ Waiting for files to be written to disk..."
-              sleep 10
-              
-              # Verify system image was installed
-              echo "🔍 Verifying system image installation..."
-              
-              if [ -d "$ANDROID_HOME/system-images/android-35/google_apis_playstore/arm64-v8a" ]; then
-                echo "✅ Android 35 Google Play ARM64 system image found!"
-                ls -la "$ANDROID_HOME/system-images/android-35/google_apis_playstore/arm64-v8a"
-                SYSTEM_IMAGE_PATH="system-images;android-35;google_apis_playstore;arm64-v8a"
-                ANDROID_API_LEVEL=35
-              elif [ -d "$ANDROID_HOME/system-images/android-34/google_apis_playstore/arm64-v8a" ]; then
-                echo "✅ Android 34 Google Play ARM64 system image found (using as fallback)!"
-                ls -la "$ANDROID_HOME/system-images/android-34/google_apis_playstore/arm64-v8a"
-                SYSTEM_IMAGE_PATH="system-images;android-34;google_apis_playstore;arm64-v8a"
-                ANDROID_API_LEVEL=34
-              else
-                echo "❌ System image not found after installation!"
-                echo ""
-                echo "Contents of system-images directory:"
-                if [ -d "$ANDROID_HOME/system-images" ]; then
-                  find $ANDROID_HOME/system-images -type d -maxdepth 3
-                else
-                  echo "❌ system-images directory does not exist"
-                fi
+              # Verify system image installation
+              echo "🔍 Verifying system image files..."
+              ls -la "$ANDROID_HOME/system-images/android-$ANDROID_API_LEVEL/google_apis_playstore/x86_64/" || {
+                echo "❌ System image directory not found!"
                 exit 1
-              fi
+              }
               
               # Store variables for later use
               echo "##vso[task.setvariable variable=SYSTEM_IMAGE_PATH]$SYSTEM_IMAGE_PATH"
@@ -317,18 +339,21 @@ stages:
               
               # List installed system images
               echo "📋 Installed system images:"
-              "$SDKMANAGER" --list_installed --sdk_root=$ANDROID_HOME | grep system-images || echo "No system images found"
+              "$SDKMANAGER" --list_installed --sdk_root=$ANDROID_HOME 2>&1 | grep system-images || echo "No system images found"
               
               echo ""
-              echo "📱 Creating Android Emulator with Google Play Store..."
+              echo "============================================================================"
+              echo "📱 Creating Android Emulator with Google Play Store (x86_64)..."
+              echo "============================================================================"
               echo "Using system image: $SYSTEM_IMAGE_PATH"
               echo "Android API Level: $ANDROID_API_LEVEL"
+              echo "Architecture: x86_64 (Compatible with Windows host)"
               
               # Delete existing emulator if present
               "$AVDMANAGER" delete avd -n $(emulatorName) 2>/dev/null || true
               
-              # Create new emulator with ARM64 (no need to specify --abi, it's in the package path)
-              echo "Creating emulator with Google Play Store support (ARM64)..."
+              # Create new emulator with x86_64
+              echo "Creating emulator with Google Play Store support..."
               echo "no" | "$AVDMANAGER" create avd \
                 --force \
                 --name "$(emulatorName)" \
@@ -343,23 +368,26 @@ stages:
               "$EMULATOR" -list-avds
               
               if "$EMULATOR" -list-avds | grep -q "$(emulatorName)"; then
-                echo "✅ Emulator '$(emulatorName)' created successfully"
+                echo "✅ Emulator '$(emulatorName)' created successfully with x86_64 architecture"
               else
                 echo "❌ Failed to create emulator"
                 exit 1
               fi
               
-              # Start emulator with optimized settings
-              echo "🚀 Starting emulator with optimized settings..."
+              # Start emulator with optimized settings for x86_64 with hardware acceleration
+              echo ""
+              echo "============================================================================"
+              echo "🚀 Starting x86_64 emulator with hardware acceleration..."
+              echo "============================================================================"
               nohup "$EMULATOR" -avd $(emulatorName) \
                 -no-snapshot-save \
                 -no-window \
                 -no-audio \
                 -no-boot-anim \
                 -gpu swiftshader_indirect \
+                -accel auto \
                 -memory 4096 \
                 -cores 2 \
-                -no-accel \
                 -wipe-data \
                 > emulator.log 2>&1 &
               
@@ -371,7 +399,7 @@ stages:
               echo "⏳ Waiting for emulator device to be detected..."
               
               WAIT_COUNT=0
-              MAX_WAIT=60
+              MAX_WAIT=90
               until "$ADB" devices | grep -q "emulator.*device"; do
                 if [ $WAIT_COUNT -ge $MAX_WAIT ]; then
                   echo "❌ Emulator device not detected after $MAX_WAIT seconds"
@@ -384,6 +412,8 @@ stages:
                   echo ""
                   echo "=== Emulator Log ==="
                   cat emulator.log
+                  echo ""
+                  echo "❌ CRITICAL ERROR: Check that x86_64 system image was used!"
                   exit 1
                 fi
                 sleep 1
@@ -532,6 +562,19 @@ stages:
               done
               echo "API Level: $api_level"
               
+              # Verify architecture
+              echo "🔍 Verifying emulator architecture..."
+              emu_arch=$("$ADB" shell getprop ro.product.cpu.abi 2>/dev/null | tr -d '\r\n')
+              echo "Emulator CPU Architecture: $emu_arch"
+              
+              if [[ "$emu_arch" == *"x86"* ]]; then
+                echo "✅ CONFIRMED: Running x86_64 emulator (compatible with Windows host)"
+              else
+                echo "❌ ERROR: Not running x86_64! Running: $emu_arch"
+                echo "This will not work on Windows x86_64 host!"
+                exit 1
+              fi
+              
               # Check for Google Play Store
               echo ""
               echo "🔍 Checking for Google Play Store..."
@@ -561,8 +604,13 @@ stages:
               echo "##vso[task.setvariable variable=EMULATOR_SERIAL]$EMULATOR_SERIAL"
               
               echo ""
-              echo "✅ Android emulator setup complete!"
-              echo "Note: If emulator is not fully responsive, tests may fail. Check emulator logs for details."
+              echo "============================================================================"
+              echo "✅ Android x86_64 emulator setup complete!"
+              echo "============================================================================"
+              echo "Architecture: x86_64 (Windows compatible)"
+              echo "Google Play: $( [ "$play_store_found" = true ] && echo "✅ Available" || echo "⚠️ Not detected" )"
+              echo "API Level: $api_level"
+              echo "============================================================================"
             displayName: 'Setup Android SDK and Create Emulator with Google Play'
 
           - task: Npm@1
