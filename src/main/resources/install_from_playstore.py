@@ -2,7 +2,7 @@
 """
 Automated Google Play Store Login and App Installation Script
 Installs Eptura Engage app from Play Store using provided credentials
-Compatible with Windows and macOS CI/CD environments
+Compatible with macOS and Windows CI/CD environments
 Optimized for Android 15 (API 35)
 """
 
@@ -23,8 +23,9 @@ class PlayStoreInstaller:
         self.email = email
         self.password = password
         self.driver = None
+        self.is_macos = platform.system() == 'Darwin'
         self.is_windows = platform.system() == 'Windows'
-        self.temp_dir = 'C:\\Temp' if self.is_windows else '/tmp'
+        self.temp_dir = '/tmp' if self.is_macos else ('C:\\Temp' if self.is_windows else '/tmp')
         
         # Ensure temp directory exists on Windows
         if self.is_windows and not os.path.exists(self.temp_dir):
@@ -36,7 +37,7 @@ class PlayStoreInstaller:
     def _run_adb_command(self, args, timeout=10):
         """Cross-platform ADB command execution"""
         try:
-            # On Windows, use shell=True for better compatibility
+            # On macOS/Linux, shell=False is preferred; on Windows, use shell=True for better compatibility
             result = subprocess.run(
                 ['adb'] + args,
                 capture_output=True,
@@ -76,7 +77,7 @@ class PlayStoreInstaller:
             if api_level == '35':
                 print("✅ Running Android 15 (API 35)")
         
-        # Check package manager service with increased timeout for Windows
+        # Check package manager service with platform-appropriate timeout
         result = self._run_adb_command(['shell', 'pm', 'list', 'packages'], timeout=20)
         if not result or result.returncode != 0:
             print("❌ Package manager service not ready")
@@ -86,15 +87,14 @@ class PlayStoreInstaller:
         return True
     
     def wait_for_emulator_ready(self, max_wait=180):
-        """Wait for emulator to be fully ready with all services
-        Increased timeout for Windows which may be slower initially"""
+        """Wait for emulator to be fully ready with all services"""
         print(f"⏳ Waiting for emulator to be fully ready (max {max_wait}s)...")
         
         start_time = time.time()
         while time.time() - start_time < max_wait:
             if self.check_emulator_ready():
-                # Additional wait for stability - longer on Windows
-                stability_wait = 15 if self.is_windows else 10
+                # Additional wait for stability - macOS typically faster than Windows
+                stability_wait = 8 if self.is_macos else (15 if self.is_windows else 10)
                 print(f"⏳ Waiting {stability_wait} seconds for system stability...")
                 time.sleep(stability_wait)
                 return True
@@ -110,7 +110,7 @@ class PlayStoreInstaller:
         
     def setup_driver(self):
         """Initialize Appium driver for Play Store automation
-        Optimized for Windows and Android 15"""
+        Optimized for macOS and Android 15"""
         print("🔧 Setting up Appium driver for Play Store...")
         print(f"🖥️  Platform: {platform.system()}")
         
@@ -124,17 +124,17 @@ class PlayStoreInstaller:
         options.device_name = "Android Emulator"
         options.no_reset = True
         options.full_reset = False
-        # Increased timeouts for Windows environment
+        # Timeouts optimized for macOS environment (typically faster than Windows)
         options.new_command_timeout = 600
-        options.adb_exec_timeout = 120000
-        options.uiautomator2_server_launch_timeout = 90000
-        options.uiautomator2_server_install_timeout = 90000
+        options.adb_exec_timeout = 100000
+        options.uiautomator2_server_launch_timeout = 60000
+        options.uiautomator2_server_install_timeout = 60000
         
         # Android 15 specific settings
         options.skip_server_installation = False
         options.skip_device_initialization = False
         
-        # Add retry logic with longer delays for Windows
+        # Add retry logic
         max_retries = 3
         retry_count = 0
         
@@ -146,14 +146,14 @@ class PlayStoreInstaller:
                     options=options
                 )
                 print("✅ Appium driver initialized successfully")
-                # Give it a moment to settle - longer on Windows
-                time.sleep(5 if self.is_windows else 3)
+                # Give it a moment to settle - macOS typically faster
+                time.sleep(3 if self.is_macos else (5 if self.is_windows else 3))
                 return True
             except Exception as e:
                 retry_count += 1
                 print(f"⚠️  Attempt {retry_count}/{max_retries} failed: {e}")
                 if retry_count < max_retries:
-                    wait_time = 20 * retry_count  # Increased backoff for Windows
+                    wait_time = 15 * retry_count  # Standard backoff
                     print(f"⏳ Retrying in {wait_time} seconds...")
                     time.sleep(wait_time)
                 else:
@@ -537,11 +537,11 @@ class PlayStoreInstaller:
     
     def install_via_deep_link(self, package_name="com.condecosoftware.condeco"):
         """Alternative method: Open app directly via package ID and install
-        Optimized for Windows and Android 15"""
+        Optimized for macOS and Android 15"""
         print(f"🔗 Opening app via deep link: {package_name}")
         
         try:
-            # Open Play Store app page directly - Windows compatible
+            # Open Play Store app page directly - cross-platform compatible
             result = self._run_adb_command([
                 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW',
                 '-d', f'market://details?id={package_name}'
@@ -551,24 +551,25 @@ class PlayStoreInstaller:
                 print("⚠️  Failed to open Play Store via deep link")
                 return False
             
-            time.sleep(10 if self.is_windows else 8)
+            # macOS typically has faster response times
+            time.sleep(8 if self.is_macos else (10 if self.is_windows else 8))
             
             if not self.driver:
                 if not self.setup_driver():
                     print("❌ Could not setup driver")
                     return False
             
-            # Wait for page to load - longer on Windows
+            # Wait for page to load - macOS is typically faster
             print("⏳ Waiting for Play Store page to load...")
-            time.sleep(8 if self.is_windows else 5)
+            time.sleep(5 if self.is_macos else (8 if self.is_windows else 5))
             
             # Click Install button - try multiple times
             print("📲 Looking for Install button...")
             install_clicked = False
             install_texts = ["Install", "INSTALL", "Update", "UPDATE", "Open", "OPEN", "Get"]
             
-            # More attempts on Windows due to potential slower UI
-            max_attempts = 7 if self.is_windows else 5
+            # Standard attempts for macOS (should be more responsive)
+            max_attempts = 5 if self.is_macos else (7 if self.is_windows else 5)
             
             for attempt in range(max_attempts):
                 for text in install_texts:
@@ -602,7 +603,7 @@ class PlayStoreInstaller:
                                         confirm_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
                                                                               f'new UiSelector().textContains("{confirm_text}")')
                                         confirm_btn.click()
-                                        print(f"✅ Clicked '{confirm_text}'")
+                                        print(f"✅ Confirmed with '{confirm_text}'")
                                         time.sleep(2)
                                     except:
                                         pass
@@ -620,7 +621,8 @@ class PlayStoreInstaller:
                     break
                 
                 if attempt < max_attempts - 1:
-                    wait_time = 6 if self.is_windows else 5
+                    # Standard retry wait
+                    wait_time = 5
                     print(f"⏳ Waiting before retry... (attempt {attempt + 2}/{max_attempts})")
                     time.sleep(wait_time)
             
@@ -631,8 +633,8 @@ class PlayStoreInstaller:
             # Wait for installation with dual verification
             print("⏳ Waiting for installation to complete...")
             print("   Monitoring both Play Store UI and package manager...")
-            # Increased timeout for larger apps and Windows environment
-            max_wait = 420 if self.is_windows else 360  # 7 min on Windows, 6 min on others
+            # macOS typically faster, so shorter timeout
+            max_wait = 360 if self.is_macos else (420 if self.is_windows else 360)  # 6 min on macOS, 7 min on Windows
             wait_time = 0
             check_interval = 10
             last_status = ""

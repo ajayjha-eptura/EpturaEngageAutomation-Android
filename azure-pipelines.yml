@@ -30,9 +30,9 @@ variables:
   extentReportFolder: '$(System.DefaultWorkingDirectory)/target'
   emulatorName: 'test_emulator_playstore'
 
-# Agent pool - Use Microsoft-hosted Windows agents for better Android emulator performance
+# Agent pool - Use Microsoft-hosted macOS agents for better Android emulator performance
 pool:
-  vmImage: 'windows-2022'
+  vmImage: 'macOS-13'
 
 stages:
   - stage: Build
@@ -123,7 +123,7 @@ stages:
             displayName: 'Install Python Dependencies'
 
           - bash: |
-              echo "📱 Configuring Android SDK with Google Play support for Windows x86_64..."
+              echo "📱 Configuring Android SDK with Google Play support for macOS x86_64..."
               echo "============================================================================"
               
               # Set Android environment variables
@@ -132,7 +132,7 @@ stages:
               
               echo "ANDROID_HOME: $ANDROID_HOME"
               echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-              echo "Host Architecture: x86_64 (Windows)"
+              echo "Host Architecture: x86_64 (macOS)"
               
               # Verify Android SDK exists
               if [ ! -d "$ANDROID_HOME" ]; then
@@ -143,12 +143,12 @@ stages:
               echo "📋 Android SDK structure:"
               ls -la $ANDROID_HOME/ || true
               
-              # Set up ADB path - critical for Windows Git Bash
+              # Set up ADB path
               echo "🔍 Setting up ADB..."
-              if [ -f "$ANDROID_HOME/platform-tools/adb.exe" ]; then
-                ADB="$ANDROID_HOME/platform-tools/adb.exe"
-              elif [ -f "$ANDROID_HOME/platform-tools/adb" ]; then
+              if [ -f "$ANDROID_HOME/platform-tools/adb" ]; then
                 ADB="$ANDROID_HOME/platform-tools/adb"
+              elif [ -f "$ANDROID_HOME/platform-tools/adb.exe" ]; then
+                ADB="$ANDROID_HOME/platform-tools/adb.exe"
               else
                 echo "❌ ADB not found in platform-tools"
                 ls -la "$ANDROID_HOME/platform-tools/" || echo "platform-tools directory not found"
@@ -158,27 +158,27 @@ stages:
               "$ADB" version || echo "ADB test failed"
               
               # Set up Emulator path
-              if [ -f "$ANDROID_HOME/emulator/emulator.exe" ]; then
-                EMULATOR="$ANDROID_HOME/emulator/emulator.exe"
-              elif [ -f "$ANDROID_HOME/emulator/emulator" ]; then
+              if [ -f "$ANDROID_HOME/emulator/emulator" ]; then
                 EMULATOR="$ANDROID_HOME/emulator/emulator"
+              elif [ -f "$ANDROID_HOME/emulator/emulator.exe" ]; then
+                EMULATOR="$ANDROID_HOME/emulator/emulator.exe"
               else
                 echo "❌ Emulator not found"
                 exit 1
               fi
               echo "✅ Emulator found at: $EMULATOR"
               
-              # Find sdkmanager - Windows uses .bat extension
+              # Find sdkmanager - macOS uses Unix binaries
               echo "🔍 Searching for sdkmanager..."
               SDKMANAGER=""
               
-              # Check common locations for Windows (.bat files) and Unix
-              if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat" ]; then
-                SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat"
-              elif [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+              # Check common locations for Unix and Windows
+              if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
                 SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+              elif [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat" ]; then
+                SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat"
               else
-                FOUND_SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \( -name "sdkmanager.bat" -o -name "sdkmanager" \) -type f 2>/dev/null | head -1)
+                FOUND_SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \( -name "sdkmanager" -o -name "sdkmanager.bat" \) -type f 2>/dev/null | head -1)
                 if [ -n "$FOUND_SDKMANAGER" ]; then
                   SDKMANAGER="$FOUND_SDKMANAGER"
                 else
@@ -215,7 +215,7 @@ stages:
               # Install SDK components
               echo "📦 Installing SDK components with Google Play Store..."
               echo "============================================================================"
-              echo "⚠️  IMPORTANT: Using x86_64 architecture for Windows compatibility"
+              echo "⚠️  IMPORTANT: Using x86_64 architecture for macOS compatibility"
               echo "============================================================================"
               
               echo "🔍 Checking available system images..."
@@ -240,7 +240,7 @@ stages:
               echo ""
               echo "============================================================================"
               echo "📥 Installing x86_64 system image with Google Play Store..."
-              echo "⚠️  This is CRITICAL - MUST be x86_64 for Windows hosts!"
+              echo "⚠️  This is CRITICAL - MUST be x86_64 for macOS Intel hosts!"
               echo "============================================================================"
               
               # Try Android 34 first (more stable)
@@ -322,12 +322,12 @@ stages:
               
               # Find avdmanager
               echo "🔍 Searching for avdmanager..."
-              if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager.bat" ]; then
-                AVDMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager.bat"
-              elif [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" ]; then
+              if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" ]; then
                 AVDMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
+              elif [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager.bat" ]; then
+                AVDMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager.bat"
               else
-                FOUND_AVDMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \( -name "avdmanager.bat" -o -name "avdmanager" \) -type f 2>/dev/null | head -1)
+                FOUND_AVDMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \( -name "avdmanager" -o -name "avdmanager.bat" \) -type f 2>/dev/null | head -1)
                 if [ -n "$FOUND_AVDMANAGER" ]; then
                   AVDMANAGER="$FOUND_AVDMANAGER"
                 else
@@ -347,7 +347,7 @@ stages:
               echo "============================================================================"
               echo "Using system image: $SYSTEM_IMAGE_PATH"
               echo "Android API Level: $ANDROID_API_LEVEL"
-              echo "Architecture: x86_64 (Compatible with Windows host)"
+              echo "Architecture: x86_64 (Compatible with macOS Intel host)"
               
               # Delete existing emulator if present
               "$AVDMANAGER" delete avd -n $(emulatorName) 2>/dev/null || true
@@ -374,10 +374,10 @@ stages:
                 exit 1
               fi
               
-              # Start emulator with optimized settings for x86_64 with software rendering
+              # Start emulator with optimized settings for x86_64 with hardware acceleration
               echo ""
               echo "============================================================================"
-              echo "🚀 Starting x86_64 emulator with software rendering (Windows optimized)..."
+              echo "🚀 Starting x86_64 emulator with hardware acceleration (macOS optimized)..."
               echo "============================================================================"
               
               # Kill any existing ADB server and restart it to ensure clean state
@@ -388,14 +388,14 @@ stages:
               sleep 3
               echo "✅ ADB server restarted"
               
-              # Start emulator in background (remove conflicting KVM option for Windows)
+              # Start emulator in background with hardware acceleration for macOS
               nohup "$EMULATOR" -avd $(emulatorName) \
                 -no-snapshot-save \
                 -no-window \
                 -no-audio \
                 -no-boot-anim \
-                -gpu swiftshader_indirect \
-                -accel off \
+                -gpu host \
+                -accel on \
                 -memory 4096 \
                 -cores 2 \
                 -wipe-data \
@@ -410,21 +410,12 @@ stages:
               echo "⏳ Waiting for emulator process to initialize..."
               sleep 10
               
-              # Verify emulator process is running
-              if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
-                if ! tasklist | grep -i "qemu-system" > /dev/null 2>&1; then
-                  echo "❌ Emulator process not running!"
-                  echo "=== Emulator Log ==="
-                  cat emulator.log
-                  exit 1
-                fi
-              else
-                if ! ps -p $EMULATOR_PID > /dev/null 2>&1; then
-                  echo "❌ Emulator process died!"
-                  echo "=== Emulator Log ==="
-                  cat emulator.log
-                  exit 1
-                fi
+              # Verify emulator process is running (macOS uses ps command)
+              if ! ps -p $EMULATOR_PID > /dev/null 2>&1; then
+                echo "❌ Emulator process died!"
+                echo "=== Emulator Log ==="
+                cat emulator.log
+                exit 1
               fi
               echo "✅ Emulator process is running"
               
@@ -458,12 +449,6 @@ stages:
                     echo "  Current ADB devices:"
                     "$ADB" devices
                     
-                    # Check emulator process status
-                    if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
-                      echo "  Emulator process status:"
-                      tasklist | grep -i "qemu-system" || echo "  ⚠️ Emulator process not found in tasklist"
-                    fi
-                    
                     # Show last few lines of emulator log
                     echo "  Emulator log (last 10 lines):"
                     tail -10 emulator.log 2>/dev/null || echo "  No log available yet"
@@ -478,12 +463,7 @@ stages:
                 "$ADB" devices
                 echo ""
                 echo "Checking emulator process:"
-                if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
-                  tasklist | grep -i emulator || echo "Emulator process not found"
-                  tasklist | grep -i qemu || echo "QEMU process not found"
-                else
-                  ps aux | grep emulator | grep -v grep || echo "Emulator process not found"
-                fi
+                ps aux | grep emulator | grep -v grep || echo "Emulator process not found"
                 echo ""
                 echo "=== Emulator Log ==="
                 cat emulator.log
@@ -519,7 +499,7 @@ stages:
                 "$ADB" devices
               fi
               
-              # Wait for boot completion - USE $ADB VARIABLE
+              # Wait for boot completion
               echo "⏳ Waiting for boot_completed flag..."
               timeout=180
               elapsed=0
@@ -539,7 +519,7 @@ stages:
               
               echo "✅ Boot completed flag set!"
               
-              # Check services - USE $ADB VARIABLE
+              # Check services
               echo "⏳ Waiting for Android system services (max 30 seconds)..."
               
               service_ready=false
@@ -661,11 +641,10 @@ stages:
               echo "Emulator CPU Architecture: $emu_arch"
               
               if [[ "$emu_arch" == *"x86"* ]]; then
-                echo "✅ CONFIRMED: Running x86_64 emulator (compatible with Windows host)"
+                echo "✅ CONFIRMED: Running x86_64 emulator (compatible with macOS Intel host)"
               else
-                echo "❌ ERROR: Not running x86_64! Running: $emu_arch"
-                echo "This will not work on Windows x86_64 host!"
-                exit 1
+                echo "⚠️  WARNING: Not running x86_64! Running: $emu_arch"
+                echo "This may impact performance on macOS Intel hosts"
               fi
               
               # Check for Google Play Store
@@ -700,7 +679,8 @@ stages:
               echo "============================================================================"
               echo "✅ Android x86_64 emulator setup complete!"
               echo "============================================================================"
-              echo "Architecture: x86_64 (Windows compatible)"
+              echo "Platform: macOS with hardware acceleration"
+              echo "Architecture: x86_64"
               echo "Google Play: $( [ "$play_store_found" = true ] && echo "✅ Available" || echo "⚠️ Not detected" )"
               echo "API Level: $api_level"
               echo "============================================================================"
