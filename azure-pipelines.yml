@@ -359,7 +359,7 @@ stages:
                 -gpu swiftshader_indirect \
                 -memory 4096 \
                 -cores 2 \
-                -accel on \
+                -no-accel \
                 -wipe-data \
                 > emulator.log 2>&1 &
               
