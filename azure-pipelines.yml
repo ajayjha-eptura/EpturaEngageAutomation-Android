@@ -89,20 +89,37 @@ stages:
 
           - bash: |
               echo "🐍 Installing Python dependencies for Play Store installer..."
-              python3 --version
-              pip3 --version
+              
+              # Windows uses 'python' and 'pip', not 'python3' and 'pip3'
+              if command -v python3 &> /dev/null; then
+                PYTHON_CMD=python3
+                PIP_CMD=pip3
+              else
+                PYTHON_CMD=python
+                PIP_CMD=pip
+              fi
+              
+              echo "Using Python command: $PYTHON_CMD"
+              $PYTHON_CMD --version
+              $PIP_CMD --version
               
               # Install Appium Python client and dependencies
-              # Using --break-system-packages flag to bypass PEP 668 restrictions on macOS
-              # Allow pip upgrade to fail as it's not critical
-              pip3 install --upgrade pip --break-system-packages || echo "⚠️  Pip upgrade skipped (not critical)"
-              
-              # Install required packages
-              pip3 install Appium-Python-Client --break-system-packages || { echo "❌ Failed to install Appium-Python-Client"; exit 1; }
-              pip3 install selenium --break-system-packages || { echo "❌ Failed to install selenium"; exit 1; }
+              # Note: --break-system-packages is for macOS/Linux only, Windows doesn't need it
+              echo "Installing Appium-Python-Client..."
+              if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OS" == "Windows_NT" ]]; then
+                # Windows installation
+                $PIP_CMD install --upgrade pip || echo "⚠️  Pip upgrade skipped (not critical)"
+                $PIP_CMD install Appium-Python-Client || { echo "❌ Failed to install Appium-Python-Client"; exit 1; }
+                $PIP_CMD install selenium || { echo "❌ Failed to install selenium"; exit 1; }
+              else
+                # macOS/Linux installation
+                $PIP_CMD install --upgrade pip --break-system-packages || echo "⚠️  Pip upgrade skipped (not critical)"
+                $PIP_CMD install Appium-Python-Client --break-system-packages || { echo "❌ Failed to install Appium-Python-Client"; exit 1; }
+                $PIP_CMD install selenium --break-system-packages || { echo "❌ Failed to install selenium"; exit 1; }
+              fi
               
               echo "✅ Python dependencies installed"
-              pip3 list | grep -i appium || echo "Appium package verification"
+              $PIP_CMD list | grep -i appium || echo "Appium package verification"
             displayName: 'Install Python Dependencies'
 
           - bash: |
@@ -124,25 +141,33 @@ stages:
               echo "📋 Android SDK structure:"
               ls -la $ANDROID_HOME/ || true
               
-              # Find sdkmanager - it can be in different locations
+              # Find sdkmanager - Windows uses .bat extension
               echo "🔍 Searching for sdkmanager..."
               SDKMANAGER=""
               
-              # Check common locations
-              if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+              # Check common locations for Windows (.bat files) and Unix
+              if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat" ]; then
+                SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat"
+                export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
+                echo "✅ Found sdkmanager at: $SDKMANAGER"
+              elif [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
                 SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
                 export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
+                echo "✅ Found sdkmanager at: $SDKMANAGER"
+              elif [ -f "$ANDROID_HOME/cmdline-tools/bin/sdkmanager.bat" ]; then
+                SDKMANAGER="$ANDROID_HOME/cmdline-tools/bin/sdkmanager.bat"
+                export PATH=$PATH:$ANDROID_HOME/cmdline-tools/bin
                 echo "✅ Found sdkmanager at: $SDKMANAGER"
               elif [ -f "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" ]; then
                 SDKMANAGER="$ANDROID_HOME/cmdline-tools/bin/sdkmanager"
                 export PATH=$PATH:$ANDROID_HOME/cmdline-tools/bin
                 echo "✅ Found sdkmanager at: $SDKMANAGER"
               else
-                # Search for it
+                # Search for both .bat and regular versions
                 echo "Searching in cmdline-tools directory..."
-                find "$ANDROID_HOME/cmdline-tools" -name "sdkmanager" -type f 2>/dev/null || true
+                find "$ANDROID_HOME/cmdline-tools" -name "sdkmanager.bat" -o -name "sdkmanager" -type f 2>/dev/null || true
                 
-                FOUND_SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name "sdkmanager" -type f 2>/dev/null | head -1)
+                FOUND_SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \( -name "sdkmanager.bat" -o -name "sdkmanager" \) -type f 2>/dev/null | head -1)
                 if [ -n "$FOUND_SDKMANAGER" ]; then
                   SDKMANAGER="$FOUND_SDKMANAGER"
                   SDKMANAGER_DIR=$(dirname "$FOUND_SDKMANAGER")
@@ -248,15 +273,19 @@ stages:
               echo "🔧 Verifying ADB..."
               adb version
               
-              # Find avdmanager
+              # Find avdmanager - Windows uses .bat extension
               echo "🔍 Searching for avdmanager..."
               AVDMANAGER=""
-              if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" ]; then
+              if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager.bat" ]; then
+                AVDMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager.bat"
+              elif [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" ]; then
                 AVDMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
+              elif [ -f "$ANDROID_HOME/cmdline-tools/bin/avdmanager.bat" ]; then
+                AVDMANAGER="$ANDROID_HOME/cmdline-tools/bin/avdmanager.bat"
               elif [ -f "$ANDROID_HOME/cmdline-tools/bin/avdmanager" ]; then
                 AVDMANAGER="$ANDROID_HOME/cmdline-tools/bin/avdmanager"
               else
-                FOUND_AVDMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name "avdmanager" -type f 2>/dev/null | head -1)
+                FOUND_AVDMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \( -name "avdmanager.bat" -o -name "avdmanager" \) -type f 2>/dev/null | head -1)
                 if [ -n "$FOUND_AVDMANAGER" ]; then
                   AVDMANAGER="$FOUND_AVDMANAGER"
                 else
@@ -331,7 +360,12 @@ stages:
                 if [ $WAIT_COUNT -ge $MAX_WAIT ]; then
                   echo "❌ Emulator device not detected after $MAX_WAIT seconds"
                   echo "Checking emulator process:"
-                  ps aux | grep emulator | grep -v grep || echo "Emulator process not found"
+                  # Cross-platform process check
+                  if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
+                    tasklist | grep -i emulator || echo "Emulator process not found"
+                  else
+                    ps aux | grep emulator | grep -v grep || echo "Emulator process not found"
+                  fi
                   exit 1
                 fi
                 sleep 1
@@ -530,8 +564,16 @@ stages:
               echo "🚀 Starting Appium Server..."
               mkdir -p logs
               
-              # Clean up any existing Appium processes
-              pkill -f appium || true
+              # Clean up any existing Appium processes - cross-platform
+              echo "Checking for existing Appium processes..."
+              if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
+                # Windows: kill node.exe processes on port 4723
+                echo "Windows detected - cleaning up processes on port 4723..."
+                netstat -ano | findstr :4723 | awk '{print $5}' | xargs -r taskkill //F //PID 2>/dev/null || true
+              else
+                # Unix: use pkill
+                pkill -f appium || true
+              fi
               sleep 2
               
               # Start Appium
@@ -556,50 +598,11 @@ stages:
             displayName: 'Start Appium Server'
 
           - bash: |
-              echo "📲 Installing Eptura Engage App..."
+              echo "📲 Installing Eptura Engage App using Python automation script..."
               echo "======================================================="
               
               # Define package name
               PACKAGE_NAME="com.condecosoftware.condeco"
-              
-              # Function to dismiss error dialogs
-              dismiss_error_dialogs() {
-                # Check for common error dialogs and dismiss them
-                adb shell uiautomator dump /sdcard/window_dump_check.xml 2>/dev/null
-                if adb pull /sdcard/window_dump_check.xml /tmp/error_check.xml 2>/dev/null; then
-                  # Check for "isn't responding" dialogs
-                  if grep -q "isn't responding\|not responding\|has stopped" /tmp/error_check.xml; then
-                    echo "  ⚠️  Detected error dialog, attempting to dismiss..."
-                    
-                    # Try to click "Wait" or "Close app" button
-                    for BUTTON_TEXT in "Wait" "Close app" "OK"; do
-                      if grep -q "text=\"$BUTTON_TEXT\"" /tmp/error_check.xml; then
-                        BUTTON_LINE=$(grep "text=\"$BUTTON_TEXT\"" /tmp/error_check.xml | grep "clickable=\"true\"" | head -1)
-                        if [ -n "$BUTTON_LINE" ]; then
-                          BOUNDS=$(echo "$BUTTON_LINE" | sed 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/')
-                          if [ "$BOUNDS" != "$BUTTON_LINE" ]; then
-                            X1=$(echo $BOUNDS | awk '{print $1}')
-                            Y1=$(echo $BOUNDS | awk '{print $2}')
-                            X2=$(echo $BOUNDS | awk '{print $3}')
-                            Y2=$(echo $BOUNDS | awk '{print $4}')
-                            echo "  🖱️  Clicking '$BUTTON_TEXT' button..."
-                            adb shell input tap $TAP_X $TAP_Y
-                            sleep 2
-                            return 0
-                          fi
-                        fi
-                      fi
-                    done
-                    
-                    # If buttons not found, try back button
-                    echo "  ⬅️  Trying back button..."
-                    adb shell input keyevent KEYCODE_BACK
-                    sleep 1
-                    return 0
-                  fi
-                fi
-                return 1
-              }
               
               # Check if app is already installed
               if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
@@ -632,553 +635,93 @@ stages:
               fi
               
               echo ""
-              echo "📦 Method 2: Using ADB to trigger Play Store installation..."
+              echo "📦 Method 2: Using Python automation script for Play Store installation..."
               echo ""
               
-              # Dismiss any existing error dialogs before starting
-              echo "🧹 Checking for and dismissing any error dialogs..."
-              dismiss_error_dialogs
-              
-              # Close any running apps first
-              echo "🧹 Closing any running apps..."
-              adb shell am force-stop com.android.vending 2>/dev/null || true
-              sleep 2
-              
-              # Clear Play Store cache to avoid issues - with retries to handle "Broken pipe" errors
-              echo "🧹 Clearing Play Store cache (with retry logic)..."
-              CLEAR_SUCCESS=false
-              for attempt in {1..3}; do
-                echo "  Attempt $attempt/3: Clearing Play Store cache..."
-                if adb shell pm clear com.android.vending 2>/dev/null; then
-                  CLEAR_SUCCESS=true
-                  echo "  ✅ Play Store cache cleared successfully"
-                  break
-                else
-                  echo "  ⚠️  pm clear failed (attempt $attempt), retrying..."
-                  # If pm clear fails, try to restart the package manager service
-                  if [ $attempt -lt 3 ]; then
-                    echo "  🔄 Restarting ADB connection..."
-                    adb kill-server
-                    sleep 2
-                    adb start-server
-                    sleep 3
-                    adb wait-for-device
-                    sleep 5
-                  fi
-                fi
-              done
-              
-              if [ "$CLEAR_SUCCESS" = false ]; then
-                echo "  ⚠️  Could not clear Play Store cache after 3 attempts"
-                echo "  Continuing anyway - this may affect installation reliability"
-              fi
-              
-              sleep 3
-              
-              echo "🔧 Attempting to install via Play Store programmatically..."
-              echo "Opening Play Store and triggering installation intent..."
-              
-              # Try to launch Play Store with retry logic
-              LAUNCH_SUCCESS=false
-              for attempt in {1..3}; do
-                echo "  Attempt $attempt/3: Launching Play Store..."
-                if adb shell am start -a android.intent.action.VIEW \
-                  -d "market://details?id=$PACKAGE_NAME" \
-                  -f 0x10000000 2>&1 | grep -q "Starting"; then
-                  LAUNCH_SUCCESS=true
-                  echo "  ✅ Play Store launch command successful"
-                  break
-                else
-                  echo "  ⚠️  Play Store launch failed, checking Activity Manager status..."
-                  adb shell ps | grep system_server || echo "  system_server process check failed"
-                  
-                  if [ $attempt -lt 3 ]; then
-                    echo "  🔄 Waiting and retrying..."
-                    sleep 5
-                  fi
-                fi
-              done
-              
-              if [ "$LAUNCH_SUCCESS" = false ]; then
-                echo "  ❌ Failed to launch Play Store after 3 attempts"
-                echo "  Activity Manager may not be responding"
-              fi
-              
-              echo "⏳ Waiting for Play Store to open (20 seconds for stability)..."
-              sleep 20
-              
-              # Dismiss any error dialogs that appeared
-              dismiss_error_dialogs
-              
-              # Create screenshots directory for artifacts
-              echo "📁 Creating screenshots directory..."
-              mkdir -p playstore_screenshots
-              
-              # Take a screenshot for debugging - use fallback methods if screencap fails
-              echo "📸 Capturing screen after Play Store opens..."
-              
-              # Try multiple screenshot methods
-              if adb shell screencap -p /sdcard/playstore_initial.png 2>/dev/null; then
-                if adb pull /sdcard/playstore_initial.png playstore_screenshots/01_playstore_opened.png 2>/dev/null; then
-                  echo "✅ Screenshot saved: playstore_screenshots/01_playstore_opened.png"
-                else
-                  echo "⚠️  Failed to pull screenshot from device"
-                fi
+              # Set Python command based on OS
+              if command -v python3 &> /dev/null; then
+                PYTHON_CMD=python3
               else
-                echo "⚠️  Screencap command failed - emulator may be unstable"
-                # Create a placeholder file so we know this step ran
-                echo "Screenshot capture failed at $(date)" > playstore_screenshots/01_screenshot_failed.txt
+                PYTHON_CMD=python
               fi
               
-              # Dump UI and save to file for inspection
-              echo "📋 Dumping UI hierarchy for analysis..."
-              adb shell uiautomator dump /sdcard/window_dump.xml 2>/dev/null
-              sleep 2
+              echo "Using Python: $PYTHON_CMD"
+              $PYTHON_CMD --version
               
-              # Check if we're actually on the Play Store page
-              PLAY_STORE_OPEN=false
-              APP_FOUND_IN_STORE=false
-              
-              if adb pull /sdcard/window_dump.xml /tmp/ui_dump.xml 2>/dev/null; then
-                # Save UI dump to artifacts
-                cp /tmp/ui_dump.xml playstore_screenshots/01_ui_dump_initial.xml
-                
-                if grep -q "com.android.vending" /tmp/ui_dump.xml; then
-                  PLAY_STORE_OPEN=true
-                  echo "✅ Play Store page is open"
-                else
-                  echo "⚠️  Play Store may not have opened correctly"
-                fi
-                
-                # Check if Eptura Engage app is displayed
-                if grep -qi "Eptura Engage\|eptura\|Condeco" /tmp/ui_dump.xml; then
-                  APP_FOUND_IN_STORE=true
-                  echo "✅ Eptura Engage app found in Play Store!"
-                  echo ""
-                  echo "📱 App information found in UI:"
-                  grep -i "Eptura\|Condeco" /tmp/ui_dump.xml | grep "text=" | head -5
-                else
-                  echo "⚠️  Eptura Engage app name not found in UI"
-                  echo "Searching for app package name..."
-                  if grep -q "com.condecosoftware.condeco" /tmp/ui_dump.xml; then
-                    echo "✅ App package ID found in Play Store"
-                    APP_FOUND_IN_STORE=true
-                  else
-                    echo "❌ App not found by package name either"
-                  fi
-                fi
-                
-                echo ""
-                echo "=== UI Dump Analysis ==="
-                echo "Looking for Install/Open/Update buttons..."
-                
-                # Check what buttons are actually present
-                if grep -iq "install" /tmp/ui_dump.xml; then
-                  echo "✅ Found 'Install' text in UI"
-                  grep -i "install" /tmp/ui_dump.xml | grep "text=" | head -3
-                elif grep -iq "open" /tmp/ui_dump.xml; then
-                  echo "⚠️  Found 'Open' button - app might already be installed"
-                  grep -i "open" /tmp/ui_dump.xml | grep "text=" | head -3
-                elif grep -iq "update" /tmp/ui_dump.xml; then
-                  echo "⚠️  Found 'Update' button - an older version might be installed"
-                  grep -i "update" /tmp/ui_dump.xml | grep "text=" | head -3
-                elif grep -iq "isn't responding\|not responding\|has stopped" /tmp/ui_dump.xml; then
-                  echo "❌ ERROR: System error dialog detected!"
-                  grep -i "isn't responding\|not responding\|has stopped" /tmp/ui_dump.xml | head -3
-                  
-                  # Take screenshot of error
-                  echo "📸 Capturing error dialog screenshot..."
-                  adb shell screencap -p /sdcard/error_dialog.png 2>/dev/null
-                  adb pull /sdcard/error_dialog.png playstore_screenshots/error_dialog.png 2>/dev/null
-                  
-                  echo ""
-                  echo "The emulator has stability issues."
-                  echo "📁 Screenshots and UI dumps saved to artifacts for analysis"
-                  echo ""
-                  echo "❌ CRITICAL: Cannot proceed with Play Store installation due to system errors"
-                  echo ""
-                  echo "💡 RECOMMENDED SOLUTIONS:"
-                  echo ""
-                  echo "   Option 1 (BEST): Add APK file to repository"
-                  echo "   - Download the Eptura Engage APK"
-                  echo "   - Place it at: app/Eptura_Engage.apk"
-                  echo "   - Commit and push to your repository"
-                  echo "   - This method is reliable and doesn't depend on Play Store"
-                  echo ""
-                  echo "   Option 2: Use Azure Storage or secure download"
-                  echo "   - Upload APK to Azure Storage or similar"
-                  echo "   - Add download step before this installation step"
-                  echo ""
-                  echo "⚠️  Play Store automation is NOT reliable in CI/CD environments!"
-                  echo ""
-                  exit 1
-                else
-                  echo "⚠️  No Install/Open/Update button found"
-                  echo "Showing clickable elements with text:"
-                  grep -i "clickable=\"true\"" /tmp/ui_dump.xml | grep "text=" | grep -v 'text=""' | head -10
-                fi
-                
-                # Show summary
-                echo "========================"
-                echo ""
-                echo "📊 Play Store Status Summary:"
-                echo "  • Play Store Open: $([ "$PLAY_STORE_OPEN" = true ] && echo "✅ Yes" || echo "❌ No")"
-                echo "  • App Found in Store: $([ "$APP_FOUND_IN_STORE" = true ] && echo "✅ Yes" || echo "❌ No")"
-                echo "  • Screenshots saved to: playstore_screenshots/"
-                echo ""
-              fi
-              
-              # If system error detected, stop immediately
-              if grep -q "isn't responding\|not responding\|has stopped" /tmp/ui_dump.xml 2>/dev/null; then
-                echo "❌ Cannot continue - system errors present"
+              # Check if Python script exists
+              SCRIPT_PATH="src/main/resources/install_from_playstore.py"
+              if [ ! -f "$SCRIPT_PATH" ]; then
+                echo "❌ Python script not found at: $SCRIPT_PATH"
+                echo "⚠️  Please ensure install_from_playstore.py exists in the repository"
                 exit 1
               fi
               
-              # Scroll down to ensure Install button is visible if app is found but button isn't
-              if [ "$APP_FOUND_IN_STORE" = true ]; then
-                echo "🔍 App found in store, attempting to scroll to Install button..."
-                adb shell input swipe 500 1000 500 400 500
-                sleep 2
-                
-                # Take another screenshot after scrolling
-                echo "📸 Capturing screen after scroll..."
-                adb shell screencap -p /sdcard/playstore_scrolled.png 2>/dev/null
-                adb pull /sdcard/playstore_scrolled.png playstore_screenshots/02_after_scroll.png 2>/dev/null
-                
-                # Dump UI again
-                adb shell uiautomator dump /sdcard/window_dump_scrolled.xml 2>/dev/null
-                adb pull /sdcard/window_dump_scrolled.xml playstore_screenshots/02_ui_dump_scrolled.xml 2>/dev/null
-                
-                # Check again for Install button
-                if adb pull /sdcard/window_dump_scrolled.xml /tmp/ui_dump_scrolled.xml 2>/dev/null; then
-                  if grep -iq "install" /tmp/ui_dump_scrolled.xml; then
-                    echo "✅ Install button now visible after scrolling!"
-                    grep -i "install" /tmp/ui_dump_scrolled.xml | grep "text=" | head -3
-                  fi
-                fi
-              fi
-              
-              # If Install button still not found, try keyboard navigation
-              echo ""
-              echo "⌨️ Attempting keyboard navigation to Install button..."
-              for i in {1..3}; do
-                adb shell input keyevent KEYCODE_TAB
-                sleep 0.5
-              done
-              adb shell input keyevent KEYCODE_ENTER
-              sleep 3
-              
-              # Final check for Install button visibility
-              echo "🔍 Final check for Install button..."
-              adb shell uiautomator dump /sdcard/window_dump_final.xml 2>/dev/null
-              adb pull /sdcard/window_dump_final.xml playstore_screenshots/03_ui_dump_final.xml 2>/dev/null
-              
-              if adb pull /sdcard/window_dump_final.xml /tmp/ui_dump_final.xml 2>/dev/null; then
-                if grep -iq "install" /tmp/ui_dump_final.xml; then
-                  echo "✅ Install button is visible - proceeding with installation"
-                  grep -i "install" /tmp/ui_dump_final.xml | grep "text=" | head -3
-                else
-                  echo "⚠️  Install button still not found - installation may not proceed"
-                fi
-              fi
-              
-              echo ""
-              echo "📦 Method 3: Advanced UI automation to click Install button..."
+              echo "✅ Found Python script: $SCRIPT_PATH"
               echo ""
               
-              # Try to find and click Install button
-              INSTALL_FOUND=false
+              # Get Google credentials from environment variables or Azure Key Vault
+              # NOTE: These should be stored as secure pipeline variables
+              GOOGLE_EMAIL="${GOOGLE_EMAIL:-}"
+              GOOGLE_PASSWORD="${GOOGLE_PASSWORD:-}"
               
-              if [ -f /tmp/ui_dump.xml ]; then
-                # Look for Install button (case insensitive, multiple patterns)
-                for PATTERN in "Install" "INSTALL" "install" "GET" "Get"; do
-                  echo "  🔍 Searching for button with text: $PATTERN"
-                  
-                  BUTTON_LINE=$(grep "text=\"$PATTERN\"" /tmp/ui_dump.xml | grep "clickable=\"true\"" | head -1)
-                  
-                  if [ -n "$BUTTON_LINE" ]; then
-                    echo "  ✅ Found clickable element with text '$PATTERN'"
-                    
-                    # Extract bounds using sed
-                    BOUNDS=$(echo "$BUTTON_LINE" | sed 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/')
-                    
-                    if [ "$BOUNDS" != "$BUTTON_LINE" ]; then
-                      X1=$(echo $BOUNDS | awk '{print $1}')
-                      Y1=$(echo $BOUNDS | awk '{print $2}')
-                      X2=$(echo $BOUNDS | awk '{print $3}')
-                      Y2=$(echo $BOUNDS | awk '{print $4}')
-                      
-                      TAP_X=$(( (X1 + X2) / 2 ))
-                      TAP_Y=$(( (Y1 + Y2) / 2 ))
-                      
-                      echo "  📍 Button bounds: [$X1,$Y1][$X2,$Y2]"
-                      echo "  🎯 Tapping at center: ($TAP_X, $TAP_Y)"
-                      
-                      adb shell input tap $TAP_X $TAP_Y
-                      INSTALL_FOUND=true
-                      
-                      echo "  ✅ Tapped! Waiting 5 seconds..."
-                      sleep 5
-                      
-                      # Capture screenshot after clicking Install
-                      echo "📸 Capturing screen after clicking Install..."
-                      adb shell screencap -p /sdcard/after_install_click.png 2>/dev/null
-                      adb pull /sdcard/after_install_click.png playstore_screenshots/04_after_install_click.png 2>/dev/null
-                      
-                      # Check if installation started
-                      adb shell uiautomator dump /sdcard/window_dump2.xml 2>/dev/null
-                      if adb pull /sdcard/window_dump2.xml /tmp/ui_dump2.xml 2>/dev/null; then
-                        cp /tmp/ui_dump2.xml playstore_screenshots/04_ui_dump_after_click.xml
-                        if grep -qi "downloading\|installing\|pending\|cancel" /tmp/ui_dump2.xml; then
-                          echo "  ✅ Installation appears to have started!"
-                          break
-                        else
-                          echo "  ⚠️  No installation progress detected"
-                          INSTALL_FOUND=false
-                        fi
-                      fi
-                    fi
-                  fi
-                done
-              fi
-              
-              # Check for and handle account selection or permission dialogs
-              echo ""
-              echo "🔍 Checking for account selection or permission dialogs..."
-              adb shell uiautomator dump /sdcard/window_dump3.xml 2>/dev/null
-              if adb pull /sdcard/window_dump3.xml /tmp/ui_dump3.xml 2>/dev/null; then
-                cp /tmp/ui_dump3.xml playstore_screenshots/05_ui_dump_dialogs.xml
-                for BUTTON_TEXT in "Continue" "CONTINUE" "Accept" "ACCEPT" "OK"; do
-                  if grep -q "text=\"$BUTTON_TEXT\"" /tmp/ui_dump3.xml; then
-                    BUTTON_LINE=$(grep "text=\"$BUTTON_TEXT\"" /tmp/ui_dump3.xml | grep "clickable=\"true\"" | head -1)
-                    
-                    if [ -n "$BUTTON_LINE" ]; then
-                      echo "  ✅ Found '$BUTTON_TEXT' button, clicking it..."
-                      BOUNDS=$(echo "$BUTTON_LINE" | sed 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/')
-                      
-                      if [ "$BOUNDS" != "$BUTTON_LINE" ]; then
-                        X1=$(echo $BOUNDS | awk '{print $1}')
-                        Y1=$(echo $BOUNDS | awk '{print $2}')
-                        X2=$(echo $BOUNDS | awk '{print $3}')
-                        Y2=$(echo $BOUNDS | awk '{print $4}')
-                        
-                        TAP_X=$(( (X1 + X2) / 2 ))
-                        TAP_Y=$(( (Y1 + Y2) / 2 ))
-                        
-                        adb shell input tap $TAP_X $TAP_Y
-                        sleep 3
-                        break
-                      fi
-                    fi
-                  fi
-                done
-              fi
-              
-              echo ""
-              echo "⏳ Monitoring for app installation (max 3 minutes)..."
-              echo "   Will check every 10 seconds for package installation"
-              echo ""
-              
-              # Reduced monitoring loop - 3 minutes max instead of 10
-              MAX_WAIT=180
-              ELAPSED=0
-              CHECK_INTERVAL=10
-              ERROR_DIALOG_COUNT=0
-              SCREENSHOT_COUNT=5
-              
-              while [ $ELAPSED -lt $MAX_WAIT ]; do
-                # Dismiss error dialogs
-                if dismiss_error_dialogs; then
-                  ERROR_DIALOG_COUNT=$((ERROR_DIALOG_COUNT + 1))
-                  echo "  ⚠️  Dismissed error dialog (count: $ERROR_DIALOG_COUNT)"
-                  
-                  # Capture screenshot of error
-                  SCREENSHOT_COUNT=$((SCREENSHOT_COUNT + 1))
-                  adb shell screencap -p /sdcard/error_${ERROR_DIALOG_COUNT}.png 2>/dev/null
-                  adb pull /sdcard/error_${ERROR_DIALOG_COUNT}.png playstore_screenshots/error_dialog_${ERROR_DIALOG_COUNT}.png 2>/dev/null
-                  
-                  # If too many errors, give up
-                  if [ $ERROR_DIALOG_COUNT -ge 3 ]; then
-                    echo ""
-                    echo "❌ Too many system errors detected ($ERROR_DIALOG_COUNT)"
-                    echo "The emulator is unstable and cannot complete Play Store installation"
-                    echo ""
-                    break
-                  fi
-                  
-                  # Try reopening Play Store after error
-                  echo "  🔄 Reopening Play Store..."
-                  adb shell am start -a android.intent.action.VIEW \
-                    -d "market://details?id=$PACKAGE_NAME" \
-                    -f 0x10000000
-                  sleep 5
-                fi
-                
-                # Check if package is installed
-                if adb shell pm list packages 2>/dev/null | grep -q "$PACKAGE_NAME"; then
-                  echo ""
-                  echo "✅ App package detected in system!"
-                  
-                  # Capture success screenshot
-                  adb shell screencap -p /sdcard/install_success.png 2>/dev/null
-                  adb pull /sdcard/install_success.png playstore_screenshots/99_install_success.png 2>/dev/null
-                  
-                  sleep 5
-                  
-                  # Verify it's actually installed
-                  if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
-                    echo "✅ Installation confirmed!"
-                    
-                    APP_INFO=$(adb shell dumpsys package $PACKAGE_NAME | grep -E "versionName|versionCode" | head -2 2>/dev/null || echo "version info unavailable")
-                    echo ""
-                    echo "📱 Installed app info:"
-                    echo "$APP_INFO"
-                    echo ""
-                    echo "📁 All screenshots saved to: playstore_screenshots/"
-                    echo ""
-                    exit 0
-                  fi
-                fi
-                
-                # Check UI state every 30 seconds and capture screenshots
-                if [ $((ELAPSED % 30)) -eq 0 ] && [ $ELAPSED -gt 0 ]; then
-                  echo "  ⏳ Still waiting... ($ELAPSED seconds elapsed)"
-                  
-                  # Capture periodic screenshot
-                  SCREENSHOT_COUNT=$((SCREENSHOT_COUNT + 1))
-                  adb shell screencap -p /sdcard/progress_${ELAPSED}.png 2>/dev/null
-                  adb pull /sdcard/progress_${ELAPSED}.png playstore_screenshots/progress_${ELAPSED}s.png 2>/dev/null
-                  
-                  # Check UI for progress or errors
-                  adb shell uiautomator dump /sdcard/window_dump_progress.xml 2>/dev/null
-                  if adb pull /sdcard/window_dump_progress.xml /tmp/ui_progress.xml 2>/dev/null; then
-                    cp /tmp/ui_progress.xml playstore_screenshots/progress_${ELAPSED}s.xml
-                    if grep -q 'text="Open"' /tmp/ui_progress.xml || grep -q 'text="OPEN"' /tmp/ui_progress.xml; then
-                      echo "     ✅ 'Open' button detected - checking package manager..."
-                    elif grep -qi "download\|install\|pending" /tmp/ui_progress.xml; then
-                      echo "     📥 Installation in progress..."
-                    elif grep -qi "error\|failed\|unable\|unavailable\|can't install" /tmp/ui_progress.xml; then
-                      echo "     ❌ Error detected in UI!"
-                      grep -i "error\|failed\|unable" /tmp/ui_progress.xml | grep "text=" | head -3
-                      echo "     Installation appears to have failed"
-                      break
-                    else
-                      echo "     ⏳ Play Store active (state unknown)"
-                    fi
-                  fi
-                fi
-                
-                sleep $CHECK_INTERVAL
-                ELAPSED=$((ELAPSED + CHECK_INTERVAL))
-              done
-              
-              # Final check
-              if adb shell pm list packages 2>/dev/null | grep -q "$PACKAGE_NAME"; then
-                echo "✅ App installed successfully!"
-                adb shell screencap -p /sdcard/final_success.png 2>/dev/null
-                adb pull /sdcard/final_success.png playstore_screenshots/99_final_success.png 2>/dev/null
-                echo "📁 All screenshots saved to: playstore_screenshots/"
-                exit 0
-              fi
-              
-              echo ""
-              echo "❌ Installation failed or timed out after $ELAPSED seconds"
-              echo ""
-              
-              # Capture final state screenshot
-              adb shell screencap -p /sdcard/final_state.png 2>/dev/null
-              adb pull /sdcard/final_state.png playstore_screenshots/99_final_state.png 2>/dev/null
-              
-              # Show final state
-              if [ -f /tmp/ui_progress.xml ]; then
-                echo "📋 Final UI state:"
-                echo "=================="
-                grep -i "install\|open\|download\|error\|unavailable\|failed" /tmp/ui_progress.xml | grep "text=" | grep -v 'text=""' | head -15 || echo "No relevant UI elements found"
-                echo "=================="
-              fi
-              
-              # Create a comprehensive debug report
-              echo ""
-              echo "📝 Creating debug report..."
-              {
-                echo "================================================================="
-                echo "PLAY STORE INSTALLATION DEBUG REPORT"
-                echo "Generated: $(date)"
-                echo "================================================================="
+              if [ -z "$GOOGLE_EMAIL" ] || [ -z "$GOOGLE_PASSWORD" ]; then
+                echo "⚠️  WARNING: Google credentials not provided"
+                echo "ℹ️  The Python script will attempt deep-link installation (no login required)"
+                echo "ℹ️  To enable full automation, set GOOGLE_EMAIL and GOOGLE_PASSWORD as pipeline variables"
                 echo ""
-                echo "SUMMARY:"
-                echo "--------"
-                echo "Installation Status: FAILED"
-                echo "Play Store Opened: $PLAY_STORE_OPEN"
-                echo "App Found in Store: $APP_FOUND_IN_STORE"
-                echo "Error Dialog Count: $ERROR_DIALOG_COUNT"
-                echo "Time Elapsed: $ELAPSED seconds"
-                echo ""
-                echo "PACKAGE INFORMATION:"
-                echo "-------------------"
-                echo "Target Package: $PACKAGE_NAME"
-                echo "App Name: Eptura Engage / Condeco"
-                echo ""
-                echo "UI ANALYSIS:"
-                echo "-----------"
-              } > playstore_screenshots/DEBUG_REPORT.txt
-              
-              if [ -f /tmp/ui_dump.xml ]; then
-                echo "Initial UI Dump:" >> playstore_screenshots/DEBUG_REPORT.txt
-                if grep -qi "Eptura\|Condeco" /tmp/ui_dump.xml; then
-                  echo "✅ App name found in initial UI" >> playstore_screenshots/DEBUG_REPORT.txt
-                  grep -i "Eptura\|Condeco" /tmp/ui_dump.xml | grep "text=" | head -3 >> playstore_screenshots/DEBUG_REPORT.txt
-                else
-                  echo "❌ App name NOT found in initial UI" >> playstore_screenshots/DEBUG_REPORT.txt
-                fi
-                echo "" >> playstore_screenshots/DEBUG_REPORT.txt
-                
-                if grep -qi "install" /tmp/ui_dump.xml; then
-                  echo "✅ Install button found:" >> playstore_screenshots/DEBUG_REPORT.txt
-                  grep -i "install" /tmp/ui_dump.xml | grep "text=" | head -3 >> playstore_screenshots/DEBUG_REPORT.txt
-                else
-                  echo "❌ Install button NOT found" >> playstore_screenshots/DEBUG_REPORT.txt
-                fi
-                echo "" >> playstore_screenshots/DEBUG_REPORT.txt
+              else
+                echo "✅ Google credentials found (masked for security)"
+                echo "📧 Email: ${GOOGLE_EMAIL:0:2}***@***"
               fi
               
-              echo "SCREENSHOTS CAPTURED:" >> playstore_screenshots/DEBUG_REPORT.txt
-              ls -lh playstore_screenshots/ >> playstore_screenshots/DEBUG_REPORT.txt
-              echo "" >> playstore_screenshots/DEBUG_REPORT.txt
+              # Run the Python automation script
+              echo "🚀 Starting automated Play Store installation..."
+              echo "=================================================="
               
-              echo "RECOMMENDATIONS:" >> playstore_screenshots/DEBUG_REPORT.txt
-              echo "1. Check the XML files to see the exact UI hierarchy" >> playstore_screenshots/DEBUG_REPORT.txt
-              echo "2. Verify if 'Eptura Engage' or 'Condeco' appears in the UI dumps" >> playstore_screenshots/DEBUG_REPORT.txt
-              echo "3. If app not found: The app may not be available in this region/device" >> playstore_screenshots/DEBUG_REPORT.txt
-              echo "4. BEST SOLUTION: Add APK file directly to repository" >> playstore_screenshots/DEBUG_REPORT.txt
-              echo "" >> playstore_screenshots/DEBUG_REPORT.txt
-              echo "=================================================================" >> playstore_screenshots/DEBUG_REPORT.txt
+              if [ -n "$GOOGLE_EMAIL" ] && [ -n "$GOOGLE_PASSWORD" ]; then
+                # Run with credentials for full automation
+                $PYTHON_CMD "$SCRIPT_PATH" "$GOOGLE_EMAIL" "$GOOGLE_PASSWORD" "Eptura Engage"
+                INSTALL_RESULT=$?
+              else
+                # Run without credentials - will use deep link method only
+                export GOOGLE_EMAIL=""
+                export GOOGLE_PASSWORD=""
+                $PYTHON_CMD "$SCRIPT_PATH"
+                INSTALL_RESULT=$?
+              fi
               
-              echo "✅ Debug report saved to: playstore_screenshots/DEBUG_REPORT.txt"
+              echo ""
+              echo "=================================================="
               
-              echo ""
-              echo "❌ PLAY STORE AUTOMATION FAILED"
-              echo ""
-              echo "💡 SOLUTION: Play Store automation is unreliable in CI/CD environments."
-              echo ""
-              echo "   📱 RECOMMENDED: Add APK file to your repository"
-              echo "   ────────────────────────────────────────────────"
-              echo "   1. Download the Eptura Engage APK file"
-              echo "   2. Create folder: mkdir -p app"
-              echo "   3. Place APK: app/Eptura_Engage.apk"
-              echo "   4. Commit and push to repository"
-              echo "   5. This pipeline will automatically install it"
-              echo ""
-              echo "   Alternative options:"
-              echo "   • Use Azure Storage with SAS token to download APK"
-              echo "   • Build APK from source in pipeline"
-              echo ""
-              echo "📁 Screenshots and UI dumps saved to: playstore_screenshots/"
-              echo "   Check pipeline artifacts for detailed analysis"
-              echo ""
-              exit 1
-            displayName: 'Install App from Play Store'
-            continueOnError: false
+              if [ $INSTALL_RESULT -eq 0 ]; then
+                echo "✅ Play Store installation completed successfully!"
+                
+                # Verify installation
+                if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
+                  echo "✅ App package verified: $PACKAGE_NAME"
+                  APP_INFO=$(adb shell dumpsys package $PACKAGE_NAME | grep -E "versionName|versionCode" | head -2)
+                  echo "App details:"
+                  echo "$APP_INFO"
+                  exit 0
+                else
+                  echo "⚠️  App package not found after installation"
+                  exit 1
+                fi
+              else
+                echo "❌ Play Store installation failed"
+                echo ""
+                echo "💡 TROUBLESHOOTING:"
+                echo "   1. Ensure Google Play Store is working on the emulator"
+                echo "   2. Check if Appium server is running properly"
+                echo "   3. Verify emulator has internet connectivity"
+                echo "   4. Consider adding the APK file directly to the repository"
+                echo ""
+                exit 1
+              fi
+            displayName: 'Install Eptura Engage App'
+            env:
+              GOOGLE_EMAIL: $(GOOGLE_EMAIL)
+              GOOGLE_PASSWORD: $(GOOGLE_PASSWORD)
 
           - task: PublishBuildArtifacts@1
             displayName: 'Publish Play Store Screenshots'
@@ -1215,14 +758,29 @@ stages:
 
           - bash: |
               echo "🧹 Cleanup: Stopping Appium Server..."
-              pkill -f appium || true
+              # Cross-platform cleanup
+              if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
+                # Windows: kill processes on port 4723
+                netstat -ano | findstr :4723 | awk '{print $5}' | xargs -r taskkill //F //PID 2>/dev/null || true
+              else
+                # Unix: use pkill
+                pkill -f appium || true
+              fi
             displayName: 'Stop Appium Server'
             condition: always()
 
           - bash: |
               echo "🧹 Cleanup: Stopping Emulator..."
               adb emu kill || true
-              pkill -f "emulator.*$(emulatorName)" || true
+              
+              # Cross-platform emulator cleanup
+              if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
+                # Windows: kill emulator processes
+                tasklist | grep -i "qemu-system\|emulator" | awk '{print $2}' | xargs -r taskkill //F //PID 2>/dev/null || true
+              else
+                # Unix: use pkill
+                pkill -f "emulator.*$(emulatorName)" || true
+              fi
               sleep 5
             displayName: 'Stop Emulator'
             condition: always()
