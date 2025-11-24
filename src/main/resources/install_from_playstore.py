@@ -2,12 +2,15 @@
 """
 Automated Google Play Store Login and App Installation Script
 Installs Eptura Engage app from Play Store using provided credentials
+Compatible with Windows and macOS CI/CD environments
+Optimized for Android 15 (API 35)
 """
 
 import os
 import sys
 import time
 import subprocess
+import platform
 from appium import webdriver
 from appium.options.android import UiAutomator2Options
 from appium.webdriver.common.appiumby import AppiumBy
@@ -20,56 +23,84 @@ class PlayStoreInstaller:
         self.email = email
         self.password = password
         self.driver = None
+        self.is_windows = platform.system() == 'Windows'
+        self.temp_dir = 'C:\\Temp' if self.is_windows else '/tmp'
+        
+        # Ensure temp directory exists on Windows
+        if self.is_windows and not os.path.exists(self.temp_dir):
+            try:
+                os.makedirs(self.temp_dir)
+            except:
+                self.temp_dir = os.path.expanduser('~\\AppData\\Local\\Temp')
+    
+    def _run_adb_command(self, args, timeout=10):
+        """Cross-platform ADB command execution"""
+        try:
+            # On Windows, use shell=True for better compatibility
+            result = subprocess.run(
+                ['adb'] + args,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                shell=self.is_windows
+            )
+            return result
+        except subprocess.TimeoutExpired:
+            print(f"❌ Timeout executing ADB command: {' '.join(args)}")
+            return None
+        except Exception as e:
+            print(f"❌ Error executing ADB command: {e}")
+            return None
     
     def check_emulator_ready(self):
         """Verify emulator is fully booted and services are ready"""
         print("🔍 Verifying emulator readiness...")
         
-        try:
-            # Check if device is connected
-            result = subprocess.run(['adb', 'devices'], capture_output=True, text=True, timeout=10)
-            if 'emulator' not in result.stdout:
-                print("❌ No emulator device found")
-                return False
-            
-            # Check boot completed
-            result = subprocess.run(['adb', 'shell', 'getprop', 'sys.boot_completed'], 
-                                  capture_output=True, text=True, timeout=10)
-            if '1' not in result.stdout:
-                print("❌ Emulator boot not completed")
-                return False
-            
-            # Check package manager service
-            result = subprocess.run(['adb', 'shell', 'pm', 'list', 'packages'], 
-                                  capture_output=True, text=True, timeout=10)
-            if result.returncode != 0 or 'Can\'t find service' in result.stderr:
-                print("❌ Package manager service not ready")
-                return False
-            
-            print("✅ Emulator is ready")
-            return True
-            
-        except subprocess.TimeoutExpired:
-            print("❌ Timeout checking emulator status")
+        # Check if device is connected
+        result = self._run_adb_command(['devices'])
+        if not result or 'emulator' not in result.stdout:
+            print("❌ No emulator device found")
             return False
-        except Exception as e:
-            print(f"❌ Error checking emulator: {e}")
+        
+        # Check boot completed
+        result = self._run_adb_command(['shell', 'getprop', 'sys.boot_completed'])
+        if not result or '1' not in result.stdout:
+            print("❌ Emulator boot not completed")
             return False
+        
+        # Check Android version (API 35 for Android 15)
+        result = self._run_adb_command(['shell', 'getprop', 'ro.build.version.sdk'])
+        if result:
+            api_level = result.stdout.strip()
+            print(f"📱 Android API Level: {api_level}")
+            if api_level == '35':
+                print("✅ Running Android 15 (API 35)")
+        
+        # Check package manager service with increased timeout for Windows
+        result = self._run_adb_command(['shell', 'pm', 'list', 'packages'], timeout=20)
+        if not result or result.returncode != 0:
+            print("❌ Package manager service not ready")
+            return False
+        
+        print("✅ Emulator is ready")
+        return True
     
-    def wait_for_emulator_ready(self, max_wait=120):
-        """Wait for emulator to be fully ready with all services"""
+    def wait_for_emulator_ready(self, max_wait=180):
+        """Wait for emulator to be fully ready with all services
+        Increased timeout for Windows which may be slower initially"""
         print(f"⏳ Waiting for emulator to be fully ready (max {max_wait}s)...")
         
         start_time = time.time()
         while time.time() - start_time < max_wait:
             if self.check_emulator_ready():
-                # Additional wait for stability
-                print("⏳ Waiting 10 seconds for system stability...")
-                time.sleep(10)
+                # Additional wait for stability - longer on Windows
+                stability_wait = 15 if self.is_windows else 10
+                print(f"⏳ Waiting {stability_wait} seconds for system stability...")
+                time.sleep(stability_wait)
                 return True
             
             elapsed = int(time.time() - start_time)
-            if elapsed % 10 == 0:
+            if elapsed % 15 == 0:
                 print(f"  Still waiting... ({elapsed}/{max_wait}s)")
             
             time.sleep(5)
@@ -78,8 +109,10 @@ class PlayStoreInstaller:
         return False
         
     def setup_driver(self):
-        """Initialize Appium driver for Play Store automation"""
+        """Initialize Appium driver for Play Store automation
+        Optimized for Windows and Android 15"""
         print("🔧 Setting up Appium driver for Play Store...")
+        print(f"🖥️  Platform: {platform.system()}")
         
         # First ensure emulator is ready
         if not self.wait_for_emulator_ready():
@@ -91,13 +124,17 @@ class PlayStoreInstaller:
         options.device_name = "Android Emulator"
         options.no_reset = True
         options.full_reset = False
-        options.new_command_timeout = 300
-        options.adb_exec_timeout = 60000
-        # Increase uiautomator2 server launch timeout to avoid initialization errors
-        options.uiautomator2_server_launch_timeout = 60000
-        options.uiautomator2_server_install_timeout = 60000
+        # Increased timeouts for Windows environment
+        options.new_command_timeout = 600
+        options.adb_exec_timeout = 120000
+        options.uiautomator2_server_launch_timeout = 90000
+        options.uiautomator2_server_install_timeout = 90000
         
-        # Add retry logic with longer delays
+        # Android 15 specific settings
+        options.skip_server_installation = False
+        options.skip_device_initialization = False
+        
+        # Add retry logic with longer delays for Windows
         max_retries = 3
         retry_count = 0
         
@@ -109,14 +146,14 @@ class PlayStoreInstaller:
                     options=options
                 )
                 print("✅ Appium driver initialized successfully")
-                # Give it a moment to settle
-                time.sleep(3)
+                # Give it a moment to settle - longer on Windows
+                time.sleep(5 if self.is_windows else 3)
                 return True
             except Exception as e:
                 retry_count += 1
                 print(f"⚠️  Attempt {retry_count}/{max_retries} failed: {e}")
                 if retry_count < max_retries:
-                    wait_time = 15 * retry_count  # Increasing backoff
+                    wait_time = 20 * retry_count  # Increased backoff for Windows
                     print(f"⏳ Retrying in {wait_time} seconds...")
                     time.sleep(wait_time)
                 else:
@@ -499,31 +536,41 @@ class PlayStoreInstaller:
             return False
     
     def install_via_deep_link(self, package_name="com.condecosoftware.condeco"):
-        """Alternative method: Open app directly via package ID and install"""
+        """Alternative method: Open app directly via package ID and install
+        Optimized for Windows and Android 15"""
         print(f"🔗 Opening app via deep link: {package_name}")
         
         try:
-            # Open Play Store app page directly
-            import subprocess
-            subprocess.run(['adb', 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW',
-                          '-d', f'market://details?id={package_name}'], timeout=10)
-            time.sleep(8)
+            # Open Play Store app page directly - Windows compatible
+            result = self._run_adb_command([
+                'shell', 'am', 'start', '-a', 'android.intent.action.VIEW',
+                '-d', f'market://details?id={package_name}'
+            ], timeout=15)
+            
+            if not result or result.returncode != 0:
+                print("⚠️  Failed to open Play Store via deep link")
+                return False
+            
+            time.sleep(10 if self.is_windows else 8)
             
             if not self.driver:
                 if not self.setup_driver():
                     print("❌ Could not setup driver")
                     return False
             
-            # Wait for page to load
+            # Wait for page to load - longer on Windows
             print("⏳ Waiting for Play Store page to load...")
-            time.sleep(5)
+            time.sleep(8 if self.is_windows else 5)
             
             # Click Install button - try multiple times
             print("📲 Looking for Install button...")
             install_clicked = False
             install_texts = ["Install", "INSTALL", "Update", "UPDATE", "Open", "OPEN", "Get"]
             
-            for attempt in range(5):  # Try 5 times
+            # More attempts on Windows due to potential slower UI
+            max_attempts = 7 if self.is_windows else 5
+            
+            for attempt in range(max_attempts):
                 for text in install_texts:
                     try:
                         # Try with multiple selector strategies
@@ -572,18 +619,20 @@ class PlayStoreInstaller:
                 if install_clicked:
                     break
                 
-                if attempt < 4:
-                    print(f"⏳ Waiting before retry... (attempt {attempt + 2}/5)")
-                    time.sleep(5)
+                if attempt < max_attempts - 1:
+                    wait_time = 6 if self.is_windows else 5
+                    print(f"⏳ Waiting before retry... (attempt {attempt + 2}/{max_attempts})")
+                    time.sleep(wait_time)
             
             if not install_clicked:
-                print("❌ Could not find or click Install button after 5 attempts")
+                print(f"❌ Could not find or click Install button after {max_attempts} attempts")
                 return False
             
             # Wait for installation with dual verification
             print("⏳ Waiting for installation to complete...")
             print("   Monitoring both Play Store UI and package manager...")
-            max_wait = 360  # 6 minutes for large app
+            # Increased timeout for larger apps and Windows environment
+            max_wait = 420 if self.is_windows else 360  # 7 min on Windows, 6 min on others
             wait_time = 0
             check_interval = 10
             last_status = ""
@@ -600,7 +649,6 @@ class PlayStoreInstaller:
                 
                 # Check for progress indicators
                 try:
-                    # Look for download percentage or "Installing..." text
                     progress_selectors = [
                         'new UiSelector().textContains("Installing")',
                         'new UiSelector().textContains("Downloading")',
@@ -622,16 +670,11 @@ class PlayStoreInstaller:
                     pass
                 
                 # Check package manager
-                try:
-                    import subprocess
-                    result = subprocess.run(['adb', 'shell', 'pm', 'list', 'packages'],
-                                          capture_output=True, text=True, timeout=5)
-                    if package_name in result.stdout:
-                        print("✅ App package detected on device!")
-                        time.sleep(5)  # Wait a bit more for installation to complete
-                        return True
-                except:
-                    pass
+                result = self._run_adb_command(['shell', 'pm', 'list', 'packages'], timeout=10)
+                if result and package_name in result.stdout:
+                    print("✅ App package detected on device!")
+                    time.sleep(5)
+                    return True
                 
                 time.sleep(check_interval)
                 wait_time += check_interval
@@ -643,15 +686,10 @@ class PlayStoreInstaller:
             print("⏳ Performing final verification...")
             time.sleep(10)
             
-            try:
-                import subprocess
-                result = subprocess.run(['adb', 'shell', 'pm', 'list', 'packages', package_name],
-                                      capture_output=True, text=True, timeout=5)
-                if package_name in result.stdout:
-                    print("✅ Installation verified via package manager!")
-                    return True
-            except:
-                pass
+            result = self._run_adb_command(['shell', 'pm', 'list', 'packages', package_name], timeout=10)
+            if result and package_name in result.stdout:
+                print("✅ Installation verified via package manager!")
+                return True
             
             print("❌ Installation timeout - app was not installed")
             return False
@@ -676,6 +714,8 @@ def main():
     """Main execution function"""
     print("=" * 60)
     print("🏪 Google Play Store Automated Installer")
+    print(f"🖥️  Platform: {platform.system()}")
+    print(f"🤖 Optimized for Android 15 (API 35)")
     print("=" * 60)
     
     # Get credentials from command-line arguments or environment variables
