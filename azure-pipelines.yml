@@ -223,51 +223,99 @@ stages:
               echo "📦 Installing SDK components with Google Play Store..."
               echo "This may take a few minutes..."
               
-              yes | "$SDKMANAGER" \
-                --sdk_root=$ANDROID_HOME \
-                --verbose \
-                "platform-tools" \
-                "platforms;android-35" \
-                "build-tools;35.0.3" \
-                "emulator" \
-                "system-images;android-35;google_apis_playstore;x86_64" 2>&1 | grep -v "^Info:" | grep -v "^Warning:" || {
-                echo "❌ Failed to install SDK components"
-                echo ""
-                echo "Checking what went wrong..."
-                echo "Attempting to list available packages:"
-                "$SDKMANAGER" --list --sdk_root=$ANDROID_HOME 2>&1 | head -50 || true
-                echo ""
-                echo "Checking licenses directory:"
-                ls -la "$ANDROID_HOME/licenses/"
-                exit 1
+              # First, let's check what's available
+              echo "🔍 Checking available system images..."
+              "$SDKMANAGER" --list --sdk_root=$ANDROID_HOME | grep "system-images;android-35" || echo "Searching for Android 35 images..."
+              
+              # Install components one by one for better error tracking
+              echo ""
+              echo "📥 Installing platform-tools..."
+              yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "platform-tools" || echo "⚠️  platform-tools may already be installed"
+              
+              echo ""
+              echo "📥 Installing Android 35 platform..."
+              yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "platforms;android-35" || echo "⚠️  platforms;android-35 may already be installed"
+              
+              echo ""
+              echo "📥 Installing build-tools 35.0.1..."
+              yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "build-tools;35.0.1" || {
+                echo "⚠️  build-tools;35.0.1 not found, trying 35.0.0..."
+                yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "build-tools;35.0.0" || echo "Using existing build-tools"
               }
               
+              echo ""
+              echo "📥 Installing emulator..."
+              yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "emulator" || echo "⚠️  emulator may already be installed"
+              
+              echo ""
+              echo "📥 Installing system image with Google Play Store for Android 35..."
+              echo "This is the critical component - may take 5-10 minutes to download..."
+              
+              # Try to install the system image with detailed output
+              if yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME --verbose "system-images;android-35;google_apis_playstore;x86_64" 2>&1 | tee /tmp/system_image_install.log; then
+                echo "✅ System image installation command completed"
+              else
+                echo "❌ System image installation command failed"
+                echo "Checking installation log..."
+                cat /tmp/system_image_install.log | tail -20
+                
+                # Try alternative: Android 34 with Google Play Store
+                echo ""
+                echo "⚠️  Android 35 system image may not be available yet"
+                echo "📥 Trying Android 34 with Google Play Store as fallback..."
+                if yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-34;google_apis_playstore;x86_64"; then
+                  echo "✅ Android 34 system image installed as fallback"
+                  # Update variable for later use
+                  echo "##vso[task.setvariable variable=ANDROID_API_LEVEL]34"
+                else
+                  echo "❌ Failed to install any system image with Google Play Store"
+                  echo ""
+                  echo "Available system images:"
+                  "$SDKMANAGER" --list --sdk_root=$ANDROID_HOME | grep -A 50 "Available Packages:" | grep "system-images" | head -20
+                  exit 1
+                fi
+              fi
+              
+              echo ""
               echo "✅ SDK components installation completed"
               
               # Wait for installation to complete and verify
-              sleep 5
+              echo "⏳ Waiting for files to be written to disk..."
+              sleep 10
               
               # Verify system image was installed
               echo "🔍 Verifying system image installation..."
-              echo "Checking path: $ANDROID_HOME/system-images/android-35/google_apis_playstore/x86_64"
               
+              # Check for Android 35 first
               if [ -d "$ANDROID_HOME/system-images/android-35/google_apis_playstore/x86_64" ]; then
-                echo "✅ Google Play system image found!"
+                echo "✅ Android 35 Google Play system image found!"
                 ls -la "$ANDROID_HOME/system-images/android-35/google_apis_playstore/x86_64"
+                SYSTEM_IMAGE_PATH="system-images;android-35;google_apis_playstore;x86_64"
+                ANDROID_API_LEVEL=35
+              elif [ -d "$ANDROID_HOME/system-images/android-34/google_apis_playstore/x86_64" ]; then
+                echo "✅ Android 34 Google Play system image found (using as fallback)!"
+                ls -la "$ANDROID_HOME/system-images/android-34/google_apis_playstore/x86_64"
+                SYSTEM_IMAGE_PATH="system-images;android-34;google_apis_playstore;x86_64"
+                ANDROID_API_LEVEL=34
               else
                 echo "❌ System image not found after installation!"
                 echo ""
                 echo "Contents of system-images directory:"
                 if [ -d "$ANDROID_HOME/system-images" ]; then
+                  echo "📁 System images directory exists:"
                   find $ANDROID_HOME/system-images -type d -maxdepth 3
                 else
-                  echo "⚠️  system-images directory does not exist at: $ANDROID_HOME/system-images"
+                  echo "❌ system-images directory does not exist at: $ANDROID_HOME/system-images"
                 fi
                 echo ""
                 echo "📋 List of installed packages:"
                 "$SDKMANAGER" --list_installed --sdk_root=$ANDROID_HOME
                 exit 1
               fi
+              
+              # Store the system image path for later use
+              echo "##vso[task.setvariable variable=SYSTEM_IMAGE_PATH]$SYSTEM_IMAGE_PATH"
+              echo "##vso[task.setvariable variable=ANDROID_API_LEVEL]$ANDROID_API_LEVEL"
               
               # Verify ADB
               echo "🔧 Verifying ADB..."
@@ -301,21 +349,26 @@ stages:
               
               echo ""
               echo "📱 Creating Android Emulator with Google Play Store..."
+              echo "Using system image: $SYSTEM_IMAGE_PATH"
+              echo "Android API Level: $ANDROID_API_LEVEL"
               
               # Delete existing emulator if present
               "$AVDMANAGER" delete avd -n $(emulatorName) 2>/dev/null || true
               
-              # Create new emulator with Google Play
+              # Create new emulator with Google Play using the detected system image
               echo "Creating emulator with Google Play Store support..."
               echo "no" | "$AVDMANAGER" create avd \
                 --force \
                 --name "$(emulatorName)" \
-                --package "system-images;android-35;google_apis_playstore;x86_64" \
+                --package "$SYSTEM_IMAGE_PATH" \
                 --device "pixel_4" \
                 --abi x86_64 || {
-                echo "❌ Failed to create emulator"
+                echo "❌ Failed to create emulator with $SYSTEM_IMAGE_PATH"
                 echo "Available packages:"
                 "$AVDMANAGER" list target
+                echo ""
+                echo "Available system images:"
+                "$SDKMANAGER" --list_installed --sdk_root=$ANDROID_HOME | grep system-images
                 exit 1
               }
               
