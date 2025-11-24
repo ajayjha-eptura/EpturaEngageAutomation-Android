@@ -32,7 +32,7 @@ variables:
 
 # Agent pool - Use Microsoft-hosted macOS agents for better Android emulator performance
 pool:
-  vmImage: 'macOS-13'
+  vmImage: 'macOS-14'
 
 stages:
   - stage: Build
@@ -123,8 +123,21 @@ stages:
             displayName: 'Install Python Dependencies'
 
           - bash: |
-              echo "📱 Configuring Android SDK with Google Play support for macOS x86_64..."
+              echo "📱 Configuring Android SDK with Google Play support for macOS..."
               echo "============================================================================"
+              
+              # Detect host architecture
+              HOST_ARCH=$(uname -m)
+              echo "🖥️  Host Architecture: $HOST_ARCH"
+              
+              # Determine which system image architecture to use
+              if [[ "$HOST_ARCH" == "arm64" ]] || [[ "$HOST_ARCH" == "aarch64" ]]; then
+                EMULATOR_ARCH="arm64-v8a"
+                echo "✅ Detected Apple Silicon (ARM64) - will use arm64-v8a system images"
+              else
+                EMULATOR_ARCH="x86_64"
+                echo "✅ Detected Intel (x86_64) - will use x86_64 system images"
+              fi
               
               # Set Android environment variables
               export ANDROID_HOME=$ANDROID_SDK_ROOT
@@ -132,7 +145,6 @@ stages:
               
               echo "ANDROID_HOME: $ANDROID_HOME"
               echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-              echo "Host Architecture: x86_64 (macOS)"
               
               # Verify Android SDK exists
               if [ ! -d "$ANDROID_HOME" ]; then
@@ -168,11 +180,10 @@ stages:
               fi
               echo "✅ Emulator found at: $EMULATOR"
               
-              # Find sdkmanager - macOS uses Unix binaries
+              # Find sdkmanager
               echo "🔍 Searching for sdkmanager..."
               SDKMANAGER=""
               
-              # Check common locations for Unix and Windows
               if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
                 SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
               elif [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat" ]; then
@@ -215,11 +226,11 @@ stages:
               # Install SDK components
               echo "📦 Installing SDK components with Google Play Store..."
               echo "============================================================================"
-              echo "⚠️  IMPORTANT: Using x86_64 architecture for macOS compatibility"
+              echo "⚠️  Using $EMULATOR_ARCH architecture for macOS $HOST_ARCH"
               echo "============================================================================"
               
-              echo "🔍 Checking available system images..."
-              "$SDKMANAGER" --list --sdk_root=$ANDROID_HOME 2>&1 | grep "system-images;android-3[0-9];google_apis_playstore;x86_64" || echo "Searching for compatible images..."
+              echo "🔍 Checking available system images for $EMULATOR_ARCH..."
+              "$SDKMANAGER" --list --sdk_root=$ANDROID_HOME 2>&1 | grep "system-images;android-3[0-9];google_apis_playstore;$EMULATOR_ARCH" || echo "Searching for compatible images..."
               
               echo ""
               echo "📥 Installing platform-tools..."
@@ -239,8 +250,8 @@ stages:
               
               echo ""
               echo "============================================================================"
-              echo "📥 Installing x86_64 system image with Google Play Store..."
-              echo "⚠️  This is CRITICAL - MUST be x86_64 for macOS Intel hosts!"
+              echo "📥 Installing $EMULATOR_ARCH system image with Google Play Store..."
+              echo "⚠️  This is CRITICAL - MUST match host architecture!"
               echo "============================================================================"
               
               # Try Android 34 first (more stable)
@@ -248,17 +259,17 @@ stages:
               SYSTEM_IMAGE_PATH=""
               ANDROID_API_LEVEL=""
               
-              echo "Attempting to install Android 34 Google Play x86_64 system image..."
-              if echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-34;google_apis_playstore;x86_64" 2>&1 | tee /tmp/system_image_install.log; then
+              echo "Attempting to install Android 34 Google Play $EMULATOR_ARCH system image..."
+              if echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-34;google_apis_playstore;$EMULATOR_ARCH" 2>&1 | tee /tmp/system_image_install.log; then
                 echo "✅ System image installation command executed"
                 
                 # Wait for installation to complete
                 sleep 10
                 
                 # Verify installation
-                if [ -d "$ANDROID_HOME/system-images/android-34/google_apis_playstore/x86_64" ]; then
-                  echo "✅ Android 34 Google Play x86_64 system image verified!"
-                  SYSTEM_IMAGE_PATH="system-images;android-34;google_apis_playstore;x86_64"
+                if [ -d "$ANDROID_HOME/system-images/android-34/google_apis_playstore/$EMULATOR_ARCH" ]; then
+                  echo "✅ Android 34 Google Play $EMULATOR_ARCH system image verified!"
+                  SYSTEM_IMAGE_PATH="system-images;android-34;google_apis_playstore;$EMULATOR_ARCH"
                   ANDROID_API_LEVEL=34
                   SYSTEM_IMAGE_INSTALLED=true
                 fi
@@ -268,11 +279,11 @@ stages:
               if [ "$SYSTEM_IMAGE_INSTALLED" = false ]; then
                 echo ""
                 echo "⚠️  Android 34 not available, trying Android 33..."
-                if echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-33;google_apis_playstore;x86_64"; then
+                if echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-33;google_apis_playstore;$EMULATOR_ARCH"; then
                   sleep 10
-                  if [ -d "$ANDROID_HOME/system-images/android-33/google_apis_playstore/x86_64" ]; then
-                    echo "✅ Android 33 Google Play x86_64 system image verified!"
-                    SYSTEM_IMAGE_PATH="system-images;android-33;google_apis_playstore;x86_64"
+                  if [ -d "$ANDROID_HOME/system-images/android-33/google_apis_playstore/$EMULATOR_ARCH" ]; then
+                    echo "✅ Android 33 Google Play $EMULATOR_ARCH system image verified!"
+                    SYSTEM_IMAGE_PATH="system-images;android-33;google_apis_playstore;$EMULATOR_ARCH"
                     ANDROID_API_LEVEL=33
                     SYSTEM_IMAGE_INSTALLED=true
                   fi
@@ -283,11 +294,11 @@ stages:
               if [ "$SYSTEM_IMAGE_INSTALLED" = false ]; then
                 echo ""
                 echo "⚠️  Trying Android 35..."
-                if echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-35;google_apis_playstore;x86_64"; then
+                if echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-35;google_apis_playstore;$EMULATOR_ARCH"; then
                   sleep 10
-                  if [ -d "$ANDROID_HOME/system-images/android-35/google_apis_playstore/x86_64" ]; then
-                    echo "✅ Android 35 Google Play x86_64 system image verified!"
-                    SYSTEM_IMAGE_PATH="system-images;android-35;google_apis_playstore;x86_64"
+                  if [ -d "$ANDROID_HOME/system-images/android-35/google_apis_playstore/$EMULATOR_ARCH" ]; then
+                    echo "✅ Android 35 Google Play $EMULATOR_ARCH system image verified!"
+                    SYSTEM_IMAGE_PATH="system-images;android-35;google_apis_playstore;$EMULATOR_ARCH"
                     ANDROID_API_LEVEL=35
                     SYSTEM_IMAGE_INSTALLED=true
                   fi
@@ -295,7 +306,7 @@ stages:
               fi
               
               if [ "$SYSTEM_IMAGE_INSTALLED" = false ]; then
-                echo "❌ Failed to install any x86_64 system image with Google Play Store"
+                echo "❌ Failed to install any $EMULATOR_ARCH system image with Google Play Store"
                 echo ""
                 echo "Available system images:"
                 "$SDKMANAGER" --list --sdk_root=$ANDROID_HOME 2>&1 | grep google_apis_playstore || true
@@ -306,10 +317,11 @@ stages:
               echo "✅ SDK components installation completed"
               echo "System Image: $SYSTEM_IMAGE_PATH"
               echo "API Level: $ANDROID_API_LEVEL"
+              echo "Architecture: $EMULATOR_ARCH"
               
               # Verify system image installation
               echo "🔍 Verifying system image files..."
-              ls -la "$ANDROID_HOME/system-images/android-$ANDROID_API_LEVEL/google_apis_playstore/x86_64/" || {
+              ls -la "$ANDROID_HOME/system-images/android-$ANDROID_API_LEVEL/google_apis_playstore/$EMULATOR_ARCH/" || {
                 echo "❌ System image directory not found!"
                 exit 1
               }
@@ -317,6 +329,7 @@ stages:
               # Store variables for later use
               echo "##vso[task.setvariable variable=SYSTEM_IMAGE_PATH]$SYSTEM_IMAGE_PATH"
               echo "##vso[task.setvariable variable=ANDROID_API_LEVEL]$ANDROID_API_LEVEL"
+              echo "##vso[task.setvariable variable=EMULATOR_ARCH]$EMULATOR_ARCH"
               echo "##vso[task.setvariable variable=ADB_PATH]$ADB"
               echo "##vso[task.setvariable variable=EMULATOR_PATH]$EMULATOR"
               
@@ -343,16 +356,16 @@ stages:
               
               echo ""
               echo "============================================================================"
-              echo "📱 Creating Android Emulator with Google Play Store (x86_64)..."
+              echo "📱 Creating Android Emulator with Google Play Store ($EMULATOR_ARCH)..."
               echo "============================================================================"
               echo "Using system image: $SYSTEM_IMAGE_PATH"
               echo "Android API Level: $ANDROID_API_LEVEL"
-              echo "Architecture: x86_64 (Compatible with macOS Intel host)"
+              echo "Architecture: $EMULATOR_ARCH (matches host: $HOST_ARCH)"
               
               # Delete existing emulator if present
               "$AVDMANAGER" delete avd -n $(emulatorName) 2>/dev/null || true
               
-              # Create new emulator with x86_64
+              # Create new emulator
               echo "Creating emulator with Google Play Store support..."
               echo "no" | "$AVDMANAGER" create avd \
                 --force \
@@ -368,19 +381,19 @@ stages:
               "$EMULATOR" -list-avds
               
               if "$EMULATOR" -list-avds | grep -q "$(emulatorName)"; then
-                echo "✅ Emulator '$(emulatorName)' created successfully with x86_64 architecture"
+                echo "✅ Emulator '$(emulatorName)' created successfully with $EMULATOR_ARCH architecture"
               else
                 echo "❌ Failed to create emulator"
                 exit 1
               fi
               
-              # Start emulator with optimized settings for x86_64 with hardware acceleration
+              # Start emulator with optimized settings
               echo ""
               echo "============================================================================"
-              echo "🚀 Starting x86_64 emulator with hardware acceleration (macOS optimized)..."
+              echo "🚀 Starting $EMULATOR_ARCH emulator (macOS $HOST_ARCH optimized)..."
               echo "============================================================================"
               
-              # Kill any existing ADB server and restart it to ensure clean state
+              # Kill any existing ADB server and restart it
               echo "🔄 Restarting ADB server for clean state..."
               "$ADB" kill-server || true
               sleep 2
@@ -388,29 +401,50 @@ stages:
               sleep 3
               echo "✅ ADB server restarted"
               
-              # Start emulator in background with hardware acceleration for macOS
-              nohup "$EMULATOR" -avd $(emulatorName) \
-                -no-snapshot-save \
-                -no-window \
-                -no-audio \
-                -no-boot-anim \
-                -gpu host \
-                -accel on \
-                -memory 4096 \
-                -cores 2 \
-                -wipe-data \
-                -verbose \
-                > emulator.log 2>&1 &
+              # Start emulator in background with architecture-specific settings
+              if [[ "$EMULATOR_ARCH" == "arm64-v8a" ]]; then
+                # ARM64 emulator on Apple Silicon - no hardware acceleration needed
+                echo "Starting ARM64 emulator (native on Apple Silicon)..."
+                nohup "$EMULATOR" -avd $(emulatorName) \
+                  -no-snapshot-save \
+                  -no-window \
+                  -no-audio \
+                  -no-boot-anim \
+                  -gpu swiftshader_indirect \
+                  -memory 4096 \
+                  -cores 2 \
+                  -wipe-data \
+                  -verbose \
+                  > emulator.log 2>&1 &
+              else
+                # x86_64 emulator - use software rendering for Azure CI stability
+                echo "Starting x86_64 emulator with software rendering (Azure CI optimized)..."
+                nohup "$EMULATOR" -avd $(emulatorName) \
+                  -no-snapshot-save \
+                  -no-window \
+                  -no-audio \
+                  -no-boot-anim \
+                  -gpu swiftshader_indirect \
+                  -accel auto \
+                  -memory 3072 \
+                  -cores 2 \
+                  -camera-back none \
+                  -camera-front none \
+                  -wipe-data \
+                  -qemu -m 3072 \
+                  -verbose \
+                  > emulator.log 2>&1 &
+              fi
               
               EMULATOR_PID=$!
               echo "Emulator PID: $EMULATOR_PID"
               echo "##vso[task.setvariable variable=EMULATOR_PID]$EMULATOR_PID"
               
-              # Give emulator a moment to initialize before polling
+              # Give emulator a moment to initialize
               echo "⏳ Waiting for emulator process to initialize..."
               sleep 10
               
-              # Verify emulator process is running (macOS uses ps command)
+              # Verify emulator process is running
               if ! ps -p $EMULATOR_PID > /dev/null 2>&1; then
                 echo "❌ Emulator process died!"
                 echo "=== Emulator Log ==="
@@ -419,8 +453,8 @@ stages:
               fi
               echo "✅ Emulator process is running"
               
-              # Wait for device to be detected with improved detection logic
-              echo "⏳ Waiting for emulator device to be detected..."
+              # Wait for device to be detected
+              echo "⏳ Waiting for emulator device to be detected (max 120 seconds)..."
               
               WAIT_COUNT=0
               MAX_WAIT=120
@@ -467,16 +501,11 @@ stages:
                 echo ""
                 echo "=== Emulator Log ==="
                 cat emulator.log
-                echo ""
-                echo "❌ TROUBLESHOOTING:"
-                echo "1. Emulator may have crashed during startup"
-                echo "2. ADB may not be detecting the emulator serial port"
-                echo "3. System image may be corrupted"
                 exit 1
               fi
               
-              # Now wait for device to come online (not just detected)
-              echo "⏳ Waiting for device to come online..."
+              # Now wait for device to come online
+              echo "⏳ Waiting for device to come online (max 120 seconds)..."
               ONLINE_WAIT=0
               MAX_ONLINE_WAIT=120
               
@@ -495,17 +524,22 @@ stages:
               done
               
               if [ $ONLINE_WAIT -ge $MAX_ONLINE_WAIT ]; then
-                echo "⚠️ Device did not come online, but continuing..."
+                echo "⚠️  Device did not come online, but continuing..."
                 "$ADB" devices
               fi
               
-              # Wait for boot completion
-              echo "⏳ Waiting for boot_completed flag..."
-              timeout=180
+              # Wait for boot completion with increased timeout for ARM64
+              if [[ "$EMULATOR_ARCH" == "arm64-v8a" ]]; then
+                BOOT_TIMEOUT=300  # 5 minutes for ARM64
+              else
+                BOOT_TIMEOUT=180  # 3 minutes for x86_64
+              fi
+              
+              echo "⏳ Waiting for boot_completed flag (max $BOOT_TIMEOUT seconds)..."
               elapsed=0
               until [[ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; do
-                if [ $elapsed -ge $timeout ]; then
-                  echo "❌ Boot timeout after $timeout seconds"
+                if [ $elapsed -ge $BOOT_TIMEOUT ]; then
+                  echo "❌ Boot timeout after $BOOT_TIMEOUT seconds"
                   echo "=== Emulator Log (last 100 lines) ==="
                   tail -100 emulator.log
                   exit 1
@@ -513,7 +547,7 @@ stages:
                 sleep 5
                 elapsed=$((elapsed+5))
                 if [ $((elapsed % 15)) -eq 0 ]; then
-                  echo "  Still booting... ($elapsed/$timeout seconds)"
+                  echo "  Still booting... ($elapsed/$BOOT_TIMEOUT seconds)"
                 fi
               done
               
@@ -556,12 +590,9 @@ stages:
               
               if [ "$service_ready" = false ]; then
                 echo "⚠️  Services not ready after $max_wait seconds, but continuing..."
-                echo "Attempting to check emulator state:"
-                "$ADB" shell getprop sys.boot_completed
-                "$ADB" shell pm list packages | head -5
               fi
               
-              # Reduced stability wait
+              # Stability wait
               echo "⏳ Allowing system to stabilize (30 seconds)..."
               sleep 30
               
@@ -570,7 +601,7 @@ stages:
               # Final verification
               echo "🔍 Final system verification..."
               
-              # Verify ADB connection is stable
+              # Verify ADB connection
               echo "⏳ Verifying ADB shell connection..."
               adb_shell_ready=false
               for attempt in {1..5}; do
@@ -608,12 +639,12 @@ stages:
                 echo "⚠️  Continuing anyway - tests may fail if package manager is not ready"
               fi
               
-              # Verify emulator is ready
+              # Show emulator status
               echo ""
               echo "📱 Emulator status:"
               "$ADB" devices -l
               
-              # Try to get Android version with retry
+              # Get Android version
               android_version="unknown"
               for i in {1..3}; do
                 android_version=$("$ADB" shell getprop ro.build.version.release 2>/dev/null | tr -d '\r\n')
@@ -624,7 +655,7 @@ stages:
               done
               echo "Android version: $android_version"
               
-              # Try to get API level with retry
+              # Get API level
               api_level="unknown"
               for i in {1..3}; do
                 api_level=$("$ADB" shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r\n')
@@ -640,11 +671,10 @@ stages:
               emu_arch=$("$ADB" shell getprop ro.product.cpu.abi 2>/dev/null | tr -d '\r\n')
               echo "Emulator CPU Architecture: $emu_arch"
               
-              if [[ "$emu_arch" == *"x86"* ]]; then
-                echo "✅ CONFIRMED: Running x86_64 emulator (compatible with macOS Intel host)"
+              if [[ "$emu_arch" == "$EMULATOR_ARCH" ]] || [[ "$emu_arch" == "arm64-v8a" && "$EMULATOR_ARCH" == "arm64-v8a" ]] || [[ "$emu_arch" == "x86_64" && "$EMULATOR_ARCH" == "x86_64" ]]; then
+                echo "✅ CONFIRMED: Running $EMULATOR_ARCH emulator (matches host)"
               else
-                echo "⚠️  WARNING: Not running x86_64! Running: $emu_arch"
-                echo "This may impact performance on macOS Intel hosts"
+                echo "⚠️  WARNING: Architecture mismatch! Expected: $EMULATOR_ARCH, Got: $emu_arch"
               fi
               
               # Check for Google Play Store
@@ -677,10 +707,10 @@ stages:
               
               echo ""
               echo "============================================================================"
-              echo "✅ Android x86_64 emulator setup complete!"
+              echo "✅ Android $EMULATOR_ARCH emulator setup complete!"
               echo "============================================================================"
-              echo "Platform: macOS with hardware acceleration"
-              echo "Architecture: x86_64"
+              echo "Platform: macOS $HOST_ARCH"
+              echo "Architecture: $EMULATOR_ARCH"
               echo "Google Play: $( [ "$play_store_found" = true ] && echo "✅ Available" || echo "⚠️ Not detected" )"
               echo "API Level: $api_level"
               echo "============================================================================"
