@@ -240,8 +240,9 @@ stages:
               echo ""
               echo "📥 Installing system image with Google Play Store for Android 35..."
               echo "This is the critical component - may take 5-10 minutes to download..."
+              echo "⚠️  Using ARM64 system image (works without hardware acceleration on Windows)"
               
-              if yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME --verbose "system-images;android-35;google_apis_playstore;x86_64" 2>&1 | tee /tmp/system_image_install.log; then
+              if yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME --verbose "system-images;android-35;google_apis_playstore;arm64-v8a" 2>&1 | tee /tmp/system_image_install.log; then
                 echo "✅ System image installation command completed"
               else
                 echo "❌ System image installation command failed"
@@ -250,7 +251,7 @@ stages:
                 echo ""
                 echo "⚠️  Android 35 system image may not be available yet"
                 echo "📥 Trying Android 34 with Google Play Store as fallback..."
-                if yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-34;google_apis_playstore;x86_64"; then
+                if yes | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-34;google_apis_playstore;arm64-v8a"; then
                   echo "✅ Android 34 system image installed as fallback"
                   echo "##vso[task.setvariable variable=ANDROID_API_LEVEL]34"
                 else
@@ -269,15 +270,15 @@ stages:
               # Verify system image was installed
               echo "🔍 Verifying system image installation..."
               
-              if [ -d "$ANDROID_HOME/system-images/android-35/google_apis_playstore/x86_64" ]; then
-                echo "✅ Android 35 Google Play system image found!"
-                ls -la "$ANDROID_HOME/system-images/android-35/google_apis_playstore/x86_64"
-                SYSTEM_IMAGE_PATH="system-images;android-35;google_apis_playstore;x86_64"
+              if [ -d "$ANDROID_HOME/system-images/android-35/google_apis_playstore/arm64-v8a" ]; then
+                echo "✅ Android 35 Google Play ARM64 system image found!"
+                ls -la "$ANDROID_HOME/system-images/android-35/google_apis_playstore/arm64-v8a"
+                SYSTEM_IMAGE_PATH="system-images;android-35;google_apis_playstore;arm64-v8a"
                 ANDROID_API_LEVEL=35
-              elif [ -d "$ANDROID_HOME/system-images/android-34/google_apis_playstore/x86_64" ]; then
-                echo "✅ Android 34 Google Play system image found (using as fallback)!"
-                ls -la "$ANDROID_HOME/system-images/android-34/google_apis_playstore/x86_64"
-                SYSTEM_IMAGE_PATH="system-images;android-34;google_apis_playstore;x86_64"
+              elif [ -d "$ANDROID_HOME/system-images/android-34/google_apis_playstore/arm64-v8a" ]; then
+                echo "✅ Android 34 Google Play ARM64 system image found (using as fallback)!"
+                ls -la "$ANDROID_HOME/system-images/android-34/google_apis_playstore/arm64-v8a"
+                SYSTEM_IMAGE_PATH="system-images;android-34;google_apis_playstore;arm64-v8a"
                 ANDROID_API_LEVEL=34
               else
                 echo "❌ System image not found after installation!"
@@ -326,14 +327,13 @@ stages:
               # Delete existing emulator if present
               "$AVDMANAGER" delete avd -n $(emulatorName) 2>/dev/null || true
               
-              # Create new emulator
-              echo "Creating emulator with Google Play Store support..."
+              # Create new emulator with ARM64 (no need to specify --abi, it's in the package path)
+              echo "Creating emulator with Google Play Store support (ARM64)..."
               echo "no" | "$AVDMANAGER" create avd \
                 --force \
                 --name "$(emulatorName)" \
                 --package "$SYSTEM_IMAGE_PATH" \
-                --device "pixel_4" \
-                --abi x86_64 || {
+                --device "pixel_4" || {
                 echo "❌ Failed to create emulator"
                 exit 1
               }
