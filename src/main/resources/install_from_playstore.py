@@ -395,10 +395,15 @@ class PlayStoreInstaller:
     
     def login_to_google_account(self):
         """Automate Google account login in Play Store"""
-        print("🔐 Attempting to login to Google account...")
+        print("\n" + "="*70)
+        print("🔐 STARTING GOOGLE ACCOUNT LOGIN PROCESS")
+        print("="*70)
+        print(f"📧 Email to use: {self.email[:3]}...@{self.email.split('@')[1] if '@' in self.email else 'unknown'}")
+        print(f"🔑 Password length: {len(self.password) if self.password else 0} characters")
         
         try:
             # Check if already logged in
+            print("\n[Step 1/6] Checking if already logged in...")
             time.sleep(3)
             
             # Look for common "Sign in" or "Add account" buttons
@@ -410,234 +415,310 @@ class PlayStoreInstaller:
             ]
             
             signed_in = True
+            found_text = None
             for text in sign_in_texts:
                 try:
                     if self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, 
                                                f'new UiSelector().textContains("{text}")'):
                         signed_in = False
+                        found_text = text
+                        print(f"   ⚠️  Found '{text}' button - login required")
                         break
                 except:
                     continue
             
             if signed_in:
-                print("✅ Already logged in to Google account")
+                print("   ✅ Already logged in to Google account")
+                print("="*70 + "\n")
                 return True
             
             # Click on Sign In button
-            print("📝 Clicking Sign In...")
+            print(f"\n[Step 2/6] Clicking Sign In button (found: '{found_text}')...")
             sign_in_clicked = False
             for text in sign_in_texts:
                 try:
+                    print(f"   🔍 Trying to find button with text: '{text}'")
                     element = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
                                                       f'new UiSelector().textContains("{text}")')
                     element.click()
+                    print(f"   ✅ Successfully clicked '{text}' button")
                     sign_in_clicked = True
                     time.sleep(3)
                     break
-                except:
+                except Exception as e:
+                    print(f"   ⚠️  '{text}' not found: {str(e)[:80]}")
                     continue
             
             if not sign_in_clicked:
-                print("⚠️  Could not find Sign In button, may already be logged in")
+                print("   ⚠️  Could not find Sign In button, may already be logged in")
+                print("="*70 + "\n")
                 return True
             
             # Enter email
-            print(f"📧 Entering email: {self.email}")
+            print(f"\n[Step 3/6] Entering email address...")
+            print(f"   📧 Email: {self.email}")
             email_selectors = [
-                'new UiSelector().resourceId("identifierId")',
-                'new UiSelector().className("android.widget.EditText")',
-                'new UiSelector().textContains("Email")'
+                ('identifierId', 'new UiSelector().resourceId("identifierId")'),
+                ('EditText class', 'new UiSelector().className("android.widget.EditText")'),
+                ('Email text', 'new UiSelector().textContains("Email")')
             ]
             
             email_entered = False
-            for selector in email_selectors:
+            for selector_name, selector in email_selectors:
                 try:
+                    print(f"   🔍 Trying selector: {selector_name}")
                     email_field = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
                     email_field.clear()
+                    time.sleep(1)
                     email_field.send_keys(self.email)
+                    print(f"   ✅ Email entered successfully using: {selector_name}")
                     email_entered = True
                     break
-                except:
+                except Exception as e:
+                    print(f"   ⚠️  {selector_name} failed: {str(e)[:80]}")
                     continue
             
             if not email_entered:
-                print("❌ Could not find email input field")
+                print("   ❌ FAILED: Could not find email input field")
+                self._take_debug_screenshot("login_email_field_not_found")
+                print("="*70 + "\n")
                 return False
             
             time.sleep(2)
             
             # Click Next button
-            print("➡️  Clicking Next...")
+            print("\n[Step 4/6] Clicking Next button after email...")
             next_texts = ["Next", "NEXT", "Continue", "CONTINUE"]
+            next_clicked = False
             for text in next_texts:
                 try:
+                    print(f"   🔍 Looking for '{text}' button")
                     next_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
                                                        f'new UiSelector().textContains("{text}")')
                     next_btn.click()
+                    print(f"   ✅ Clicked '{text}' button")
+                    next_clicked = True
                     break
-                except:
+                except Exception as e:
+                    print(f"   ⚠️  '{text}' not found: {str(e)[:80]}")
                     continue
+            
+            if not next_clicked:
+                print("   ⚠️  Could not find Next button, trying to continue anyway...")
             
             time.sleep(3)
             
             # Enter password
-            print("🔑 Entering password...")
+            print("\n[Step 5/6] Entering password...")
+            print(f"   🔑 Password length: {len(self.password)} characters")
             password_selectors = [
-                'new UiSelector().resourceId("password")',
-                'new UiSelector().className("android.widget.EditText")',
-                'new UiSelector().textContains("password")'
+                ('password resourceId', 'new UiSelector().resourceId("password")'),
+                ('EditText class', 'new UiSelector().className("android.widget.EditText")'),
+                ('password text', 'new UiSelector().textContains("password")')
             ]
             
             password_entered = False
-            for selector in password_selectors:
+            for selector_name, selector in password_selectors:
                 try:
+                    print(f"   🔍 Trying selector: {selector_name}")
                     password_field = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
                     password_field.clear()
+                    time.sleep(1)
                     password_field.send_keys(self.password)
+                    print(f"   ✅ Password entered successfully using: {selector_name}")
                     password_entered = True
                     break
-                except:
+                except Exception as e:
+                    print(f"   ⚠️  {selector_name} failed: {str(e)[:80]}")
                     continue
             
             if not password_entered:
-                print("❌ Could not find password input field")
+                print("   ❌ FAILED: Could not find password input field")
+                self._take_debug_screenshot("login_password_field_not_found")
+                print("="*70 + "\n")
                 return False
             
             time.sleep(2)
             
             # Click Next/Sign in button
-            print("➡️  Clicking Sign In...")
+            print("\n[Step 6/6] Clicking Sign In button after password...")
+            signin_clicked = False
             for text in next_texts:
                 try:
+                    print(f"   🔍 Looking for '{text}' button")
                     sign_in_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
                                                           f'new UiSelector().textContains("{text}")')
                     sign_in_btn.click()
+                    print(f"   ✅ Clicked '{text}' button")
+                    signin_clicked = True
                     break
-                except:
+                except Exception as e:
+                    print(f"   ⚠️  '{text}' not found: {str(e)[:80]}")
                     continue
             
+            if not signin_clicked:
+                print("   ⚠️  Could not find Sign In button, trying to continue anyway...")
+            
             # Wait for login to complete
+            print("\n⏳ Waiting for login to complete (10 seconds)...")
             time.sleep(10)
             
             # Handle post-login prompts (Skip, Not now, etc.)
-            skip_texts = ["Skip", "SKIP", "Not now", "NO THANKS", "Accept"]
-            for _ in range(3):  # Try multiple times for different prompts
+            print("\n📱 Handling post-login prompts...")
+            skip_texts = ["Skip", "SKIP", "Not now", "NO THANKS", "Accept", "ACCEPT", "I agree", "AGREE"]
+            prompts_handled = 0
+            for attempt in range(3):  # Try multiple times for different prompts
+                print(f"   Attempt {attempt + 1}/3 to dismiss prompts...")
                 for text in skip_texts:
                     try:
                         skip_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
                                                            f'new UiSelector().textContains("{text}")')
                         skip_btn.click()
+                        print(f"      ✅ Dismissed prompt: '{text}'")
+                        prompts_handled += 1
                         time.sleep(2)
                     except:
                         continue
             
-            print("✅ Login process completed")
+            print(f"   📊 Handled {prompts_handled} post-login prompt(s)")
+            print("\n✅ LOGIN PROCESS COMPLETED")
+            print("="*70 + "\n")
             return True
             
         except Exception as e:
-            print(f"❌ Error during login: {e}")
+            print(f"\n❌ CRITICAL ERROR during login: {e}")
+            print(f"   Exception type: {type(e).__name__}")
+            print(f"   Exception details: {str(e)}")
+            self._take_debug_screenshot("login_critical_error")
+            print("="*70 + "\n")
             return False
+    
+    def _take_debug_screenshot(self, filename_prefix):
+        """Take a debug screenshot and save it"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            screenshot_dir = os.path.join(os.getcwd(), 'playstore_screenshots')
+            os.makedirs(screenshot_dir, exist_ok=True)
+            
+            screenshot_path = os.path.join(screenshot_dir, f"{filename_prefix}_{timestamp}.png")
+            self.driver.save_screenshot(screenshot_path)
+            print(f"   📸 Debug screenshot saved: {screenshot_path}")
+        except Exception as e:
+            print(f"   ⚠️  Could not save screenshot: {e}")
     
     def search_and_install_app(self, app_name="Eptura Engage"):
         """Search for app and install it"""
-        print(f"🔍 Searching for app: {app_name}")
+        print("\n" + "="*70)
+        print(f"🔍 STARTING APP SEARCH AND INSTALLATION")
+        print("="*70)
+        print(f"📱 App to search: {app_name}")
         
         try:
             # Click on search icon
-            print("🔎 Opening search...")
+            print("\n[Step 1/5] Opening search interface...")
             search_selectors = [
-                'new UiSelector().resourceId("com.android.vending:id/search_bar_hint")',
-                'new UiSelector().resourceId("com.android.vending:id/search_box_idle_text")',
-                'new UiSelector().descriptionContains("Search")',
-                'new UiSelector().textContains("Search")',
-                'new UiSelector().className("android.widget.EditText")'
+                ('search_bar_hint', 'new UiSelector().resourceId("com.android.vending:id/search_bar_hint")'),
+                ('search_box_idle_text', 'new UiSelector().resourceId("com.android.vending:id/search_box_idle_text")'),
+                ('Search description', 'new UiSelector().descriptionContains("Search")'),
+                ('Search text', 'new UiSelector().textContains("Search")'),
+                ('EditText class', 'new UiSelector().className("android.widget.EditText")')
             ]
             
             search_opened = False
-            for selector in search_selectors:
+            for selector_name, selector in search_selectors:
                 try:
+                    print(f"   🔍 Trying selector: {selector_name}")
                     search_icon = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
                     search_icon.click()
                     time.sleep(3)
                     search_opened = True
-                    print(f"✅ Search opened using selector: {selector[:50]}...")
+                    print(f"   ✅ Search opened using: {selector_name}")
                     break
-                except:
+                except Exception as e:
+                    print(f"   ⚠️  {selector_name} failed: {str(e)[:80]}")
                     continue
             
             if not search_opened:
-                print("⚠️  Could not open search, trying to proceed anyway")
+                print("   ⚠️  Could not open search, trying to proceed anyway")
+                self._take_debug_screenshot("search_open_failed")
             
             # Enter app name in search field
-            print(f"⌨️  Typing '{app_name}'...")
+            print(f"\n[Step 2/5] Entering search text: '{app_name}'...")
             search_field_selectors = [
-                'new UiSelector().resourceId("com.android.vending:id/search_bar_text_input")',
-                'new UiSelector().resourceId("com.android.vending:id/search_box_text_input")',
-                'new UiSelector().className("android.widget.EditText")',
-                'new UiSelector().focused(true)'
+                ('search_bar_text_input', 'new UiSelector().resourceId("com.android.vending:id/search_bar_text_input")'),
+                ('search_box_text_input', 'new UiSelector().resourceId("com.android.vending:id/search_box_text_input")'),
+                ('EditText class', 'new UiSelector().className("android.widget.EditText")'),
+                ('focused element', 'new UiSelector().focused(true)')
             ]
             
             text_entered = False
             search_field = None
-            for selector in search_field_selectors:
+            for selector_name, selector in search_field_selectors:
                 try:
+                    print(f"   🔍 Trying selector: {selector_name}")
                     search_field = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
                     search_field.clear()
                     time.sleep(1)
                     search_field.send_keys(app_name)
                     text_entered = True
-                    print(f"✅ Text entered successfully using selector: {selector[:60]}...")
+                    print(f"   ✅ Text entered successfully using: {selector_name}")
                     time.sleep(2)
                     break
                 except Exception as e:
-                    print(f"⚠️  Selector failed: {selector[:60]}... - {str(e)[:100]}")
+                    print(f"   ⚠️  {selector_name} failed: {str(e)[:80]}")
                     continue
             
             if not text_entered:
-                print("❌ Could not enter search text")
+                print("   ❌ FAILED: Could not enter search text")
+                self._take_debug_screenshot("search_text_entry_failed")
+                print("="*70 + "\n")
                 return False
             
             # Press Enter or click search button - try multiple methods
-            print("🔍 Attempting to execute search...")
+            print("\n[Step 3/5] Executing search (trying multiple methods)...")
             search_executed = False
             
             # Method 1: Try to press Enter key via Appium driver
             if not search_executed:
                 try:
+                    print("   🔍 Method 1: Appium press_keycode(66)")
                     self.driver.press_keycode(66)  # KEYCODE_ENTER
-                    print("✅ Pressed Enter key via press_keycode")
+                    print("   ✅ Pressed Enter key via press_keycode")
                     search_executed = True
                     time.sleep(5)  # Wait for search results
                 except Exception as e:
-                    print(f"⚠️  Method 1 (press_keycode) failed: {str(e)[:100]}")
+                    print(f"   ⚠️  Method 1 failed: {str(e)[:80]}")
             
             # Method 2: Try to press Enter using ADB directly
             if not search_executed:
                 try:
+                    print("   🔍 Method 2: ADB input keyevent ENTER")
                     result = self._run_adb_command(['shell', 'input', 'keyevent', 'KEYCODE_ENTER'])
                     if result and result.returncode == 0:
-                        print("✅ Pressed Enter key via ADB input keyevent")
+                        print("   ✅ Pressed Enter key via ADB input keyevent")
                         search_executed = True
                         time.sleep(5)
                     else:
-                        print("⚠️  Method 2 (ADB keyevent) failed")
+                        print(f"   ⚠️  Method 2 failed with return code: {result.returncode if result else 'None'}")
                 except Exception as e:
-                    print(f"⚠️  Method 2 (ADB keyevent) exception: {str(e)[:100]}")
+                    print(f"   ⚠️  Method 2 exception: {str(e)[:80]}")
             
             # Method 3: Try to click on search button/icon
             if not search_executed:
+                print("   🔍 Method 3: Click search button")
                 search_button_selectors = [
-                    'new UiSelector().descriptionContains("Search")',
-                    'new UiSelector().resourceId("com.android.vending:id/search_button")',
-                    'new UiSelector().className("android.widget.ImageButton").descriptionContains("Search")',
-                    'new UiSelector().resourceId("com.android.vending:id/action_button")'
+                    ('Search description', 'new UiSelector().descriptionContains("Search")'),
+                    ('search_button', 'new UiSelector().resourceId("com.android.vending:id/search_button")'),
+                    ('ImageButton Search', 'new UiSelector().className("android.widget.ImageButton").descriptionContains("Search")'),
+                    ('action_button', 'new UiSelector().resourceId("com.android.vending:id/action_button")')
                 ]
                 
-                for selector in search_button_selectors:
+                for selector_name, selector in search_button_selectors:
                     try:
+                        print(f"      Trying: {selector_name}")
                         search_button = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
                         search_button.click()
-                        print(f"✅ Clicked search button using selector: {selector[:60]}...")
+                        print(f"   ✅ Clicked search button using: {selector_name}")
                         search_executed = True
                         time.sleep(5)
                         break
@@ -647,81 +728,92 @@ class PlayStoreInstaller:
             # Method 4: Try sending newline character directly to the field
             if not search_executed and search_field:
                 try:
+                    print("   🔍 Method 4: Send ENTER key to search field")
                     from selenium.webdriver.common.keys import Keys
                     search_field.send_keys(Keys.ENTER)
-                    print("✅ Sent ENTER key via send_keys")
+                    print("   ✅ Sent ENTER key via send_keys")
                     search_executed = True
                     time.sleep(5)
                 except Exception as e:
-                    print(f"⚠️  Method 4 (send_keys ENTER) failed: {str(e)[:100]}")
+                    print(f"   ⚠️  Method 4 failed: {str(e)[:80]}")
             
             # Method 5: Try using ADB input text with newline
             if not search_executed:
                 try:
-                    # Tap Enter key using keycode 66
+                    print("   🔍 Method 5: ADB keycode 66")
                     result = self._run_adb_command(['shell', 'input', 'keyevent', '66'])
                     if result and result.returncode == 0:
-                        print("✅ Pressed Enter key via ADB keycode 66")
+                        print("   ✅ Pressed Enter key via ADB keycode 66")
                         search_executed = True
                         time.sleep(5)
                     else:
-                        print("⚠️  Method 5 (ADB keycode 66) failed")
+                        print(f"   ⚠️  Method 5 failed with return code: {result.returncode if result else 'None'}")
                 except Exception as e:
-                    print(f"⚠️  Method 5 (ADB keycode 66) exception: {str(e)[:100]}")
+                    print(f("   ⚠️  Method 5 exception: {str(e)[:80]}")
             
             if not search_executed:
-                print("⚠️  Could not execute search, but will try to proceed anyway")
+                print("   ⚠️  Could not execute search via any method, but will try to proceed")
+                self._take_debug_screenshot("search_execution_failed")
                 time.sleep(3)  # Give it a moment in case search auto-executed
             
             # Click on the app from search results
-            print("📱 Selecting app from results...")
+            print(f"\n[Step 4/5] Selecting '{app_name}' from results...")
             app_clicked = False
             
             # Try multiple ways to find and click the app
             app_selectors = [
-                f'new UiSelector().textContains("{app_name}")',
-                f'new UiSelector().descriptionContains("{app_name}")',
-                'new UiSelector().textContains("Eptura")',
-                'new UiSelector().textContains("Condeco")',
-                'new UiSelector().resourceId("com.android.vending:id/li_title")'
+                (f'text:{app_name}', f'new UiSelector().textContains("{app_name}")'),
+                (f'desc:{app_name}', f'new UiSelector().descriptionContains("{app_name}")'),
+                ('text:Eptura', 'new UiSelector().textContains("Eptura")'),
+                ('text:Condeco', 'new UiSelector().textContains("Condeco")'),
+                ('li_title', 'new UiSelector().resourceId("com.android.vending:id/li_title")')
             ]
             
-            for selector in app_selectors:
+            for selector_name, selector in app_selectors:
                 try:
+                    print(f"   🔍 Trying selector: {selector_name}")
                     app_item = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+                    app_name_found = app_item.text if hasattr(app_item, 'text') else selector_name
                     app_item.click()
-                    print(f"✅ App clicked using selector: {selector[:50]}...")
+                    print(f"   ✅ App clicked using: {selector_name} ('{app_name_found}')")
                     time.sleep(5)
                     app_clicked = True
                     break
-                except:
+                except Exception as e:
+                    print(f"   ⚠️  {selector_name} failed: {str(e)[:80]}")
                     continue
             
             if not app_clicked:
-                print("⚠️  Could not find app in search results, trying to continue anyway")
+                print("   ⚠️  Could not find app in search results")
+                self._take_debug_screenshot("app_not_found_in_results")
+                print("   Trying to continue anyway...")
             
             # Click Install button - try multiple times with different selectors
-            print("📲 Looking for Install button...")
+            print(f"\n[Step 5/5] Looking for and clicking Install button...")
             install_clicked = False
             install_texts = ["Install", "INSTALL", "Update", "UPDATE", "Open", "OPEN", "Get"]
             
             for attempt in range(3):  # Try 3 times
+                print(f"   Attempt {attempt + 1}/3:")
                 for text in install_texts:
                     try:
+                        print(f"      🔍 Looking for '{text}' button")
                         install_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
                                                               f'new UiSelector().textContains("{text}").className("android.widget.Button")')
                         button_text = install_btn.text
                         
                         if button_text.upper() in ["OPEN"]:
-                            print("✅ App is already installed!")
+                            print(f"      ✅ App is already installed! (found '{button_text}' button)")
+                            print("="*70 + "\n")
                             return True
                         
                         install_btn.click()
-                        print(f"✅ Clicked '{button_text}' button")
+                        print(f"      ✅ Clicked '{button_text}' button")
                         install_clicked = True
                         time.sleep(3)
                         
                         # Handle any confirmation dialogs
+                        print("      📱 Checking for confirmation dialogs...")
                         try:
                             continue_selectors = [
                                 'new UiSelector().textContains("Continue")',
@@ -732,7 +824,7 @@ class PlayStoreInstaller:
                                 try:
                                     confirm_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
                                     confirm_btn.click()
-                                    print("✅ Confirmed installation")
+                                    print(f"         ✅ Confirmed installation")
                                     time.sleep(2)
                                 except:
                                     pass
@@ -740,22 +832,25 @@ class PlayStoreInstaller:
                             pass
                         
                         break
-                    except:
+                    except Exception as e:
+                        print(f"      ⚠️  '{text}' not found: {str(e)[:60]}")
                         continue
                 
                 if install_clicked:
                     break
                     
                 if attempt < 2:
-                    print(f"⏳ Retrying... (attempt {attempt + 2}/3)")
+                    print(f"   ⏳ Retrying after 3 seconds...")
                     time.sleep(3)
             
             if not install_clicked:
-                print("❌ Could not find or click Install button")
+                print("   ❌ FAILED: Could not find or click Install button")
+                self._take_debug_screenshot("install_button_not_found")
+                print("="*70 + "\n")
                 return False
             
             # Wait for installation to complete with better verification
-            print("⏳ Waiting for installation to complete...")
+            print("\n⏳ Waiting for installation to complete...")
             print("   Checking both UI and package manager...")
             max_wait = 300  # 5 minutes
             wait_time = 0
@@ -766,7 +861,10 @@ class PlayStoreInstaller:
                 try:
                     open_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
                                                        'new UiSelector().text("Open").className("android.widget.Button")')
-                    print("✅ Installation completed successfully (Open button found)!")
+                    print(f"\n✅ INSTALLATION COMPLETED SUCCESSFULLY!")
+                    print(f"   Total time: {wait_time} seconds")
+                    print("   Method: Open button detected in UI")
+                    print("="*70 + "\n")
                     return True
                 except:
                     pass
@@ -777,7 +875,10 @@ class PlayStoreInstaller:
                     result = subprocess.run(['adb', 'shell', 'pm', 'list', 'packages', 'com.condecosoftware.condeco'],
                                           capture_output=True, text=True, timeout=5)
                     if 'com.condecosoftware.condeco' in result.stdout:
-                        print("✅ Installation completed successfully (package detected)!")
+                        print(f"\n✅ INSTALLATION COMPLETED SUCCESSFULLY!")
+                        print(f"   Total time: {wait_time} seconds")
+                        print("   Method: Package detected in package manager")
+                        print("="*70 + "\n")
                         return True
                 except:
                     pass
@@ -786,13 +887,19 @@ class PlayStoreInstaller:
                 wait_time += check_interval
                 
                 if wait_time % 30 == 0:
-                    print(f"⏳ Still installing... ({wait_time}/{max_wait} seconds)")
+                    print(f"   ⏳ Still installing... ({wait_time}/{max_wait} seconds)")
             
-            print("❌ Installation timeout - app was not installed")
+            print(f"\n❌ INSTALLATION TIMEOUT - App was not installed after {max_wait} seconds")
+            self._take_debug_screenshot("installation_timeout")
+            print("="*70 + "\n")
             return False
             
         except Exception as e:
-            print(f"❌ Error during app installation: {e}")
+            print(f"\n❌ CRITICAL ERROR during app installation: {e}")
+            print(f"   Exception type: {type(e).__name__}")
+            print(f"   Exception details: {str(e)}")
+            self._take_debug_screenshot("install_critical_error")
+            print("="*70 + "\n")
             return False
     
     def install_via_deep_link(self, package_name="com.condecosoftware.condeco"):
@@ -1064,4 +1171,3 @@ def main():
             print(f"⚠️  Could not stop recording properly: {e}")
         
         installer.cleanup()
-       
