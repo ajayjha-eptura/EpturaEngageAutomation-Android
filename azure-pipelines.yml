@@ -536,12 +536,36 @@ stages:
               GOOGLE_EMAIL: $(GOOGLE_PLAY_EMAIL)
               GOOGLE_PASSWORD: $(GOOGLE_PLAY_PASSWORD)
 
+          - bash: |
+              echo "📦 Ensuring artifact directories exist for publishing..."
+              mkdir -p playstore_screenshots
+              mkdir -p playstore-recordings
+              echo "✅ Directories created/verified"
+              
+              echo ""
+              echo "📸 Screenshots found:"
+              ls -la playstore_screenshots/ 2>/dev/null || echo "  (No screenshots generated)"
+              
+              echo ""
+              echo "🎥 Recordings found:"
+              ls -la playstore-recordings/ 2>/dev/null || echo "  (No recordings generated)"
+            displayName: 'Prepare Artifact Directories'
+            condition: always()
+            continueOnError: true
+
+          - bash: |
+              chmod +x scripts/verify_artifacts.sh
+              ./scripts/verify_artifacts.sh
+            displayName: 'Verify Artifacts Before Publishing'
+            condition: always()
+            continueOnError: true
+
           - task: PublishBuildArtifacts@1
             displayName: 'Publish Play Store Screenshots'
             inputs:
               PathtoPublish: '$(System.DefaultWorkingDirectory)/playstore_screenshots'
               ArtifactName: 'playstore-debug-screenshots'
-            condition: and(always(), eq(variables['Agent.JobStatus'], 'Succeeded'))
+            condition: always()
             continueOnError: true
 
           - task: PublishBuildArtifacts@1
@@ -550,6 +574,7 @@ stages:
               PathtoPublish: '$(System.DefaultWorkingDirectory)/playstore-recordings'
               ArtifactName: 'playstore-video-recordings'
             condition: always()
+            continueOnError: true
 
           - task: DownloadBuildArtifacts@1
             displayName: 'Download Build Artifacts'

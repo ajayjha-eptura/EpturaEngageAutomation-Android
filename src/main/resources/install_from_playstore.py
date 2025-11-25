@@ -121,43 +121,189 @@ class PlayStoreInstaller:
         """Stop ADB screen recording and pull the file"""
         try:
             if not self.recording_process:
+                print("⚠️  No recording process found")
                 return False
             
             print("⏹️  Stopping screen recording...")
             
-            # Send interrupt signal to stop recording
-            self.recording_process.terminate()
-            time.sleep(2)
-            
-            # Get the device path
+            # Get the device path before terminating
             local_path, device_path = self.recording_file
             
-            # Wait a bit for file to be finalized
-            time.sleep(3)
+            # Send SIGINT (Ctrl+C) to gracefully stop recording instead of terminate
+            # This allows screenrecord to properly finalize the video file
+            try:
+                print("   Sending stop signal to recording process...")
+                # On Unix-like systems (macOS), use SIGINT for graceful shutdown
+                if self.is_macos:
+                    import signal
+                    self.recording_process.send_signal(signal.SIGINT)
+                else:
+                    # On Windows, terminate is the best option
+                    self.recording_process.terminate()
+            except Exception as e:
+                print(f"   ⚠️  Error sending signal: {e}")
+                # Fallback to terminate
+                try:
+                    self.recording_process.terminate()
+                except:
+                    pass
             
-            # Pull the recording from device
-            print(f"📥 Pulling recording from device...")
-            result = self._run_adb_command(['pull', device_path, local_path], timeout=60)
+            # Wait for process to complete with timeout
+            print("⏳ Waiting for recording process to finish...")
+            try:
+                self.recording_process.wait(timeout=10)
+                print("   ✅ Recording process completed")
+            except subprocess.TimeoutExpired:
+                print("   ⚠️  Recording process didn't exit cleanly, forcing termination...")
+                self.recording_process.kill()
+                try:
+                    self.recording_process.wait(timeout=5)
+                except:
+                    pass
             
-            if result and result.returncode == 0:
-                # Clean up device file
-                self._run_adb_command(['shell', 'rm', device_path])
+            # CRITICAL FIX: Wait much longer for the file to be fully written and closed on device
+            # Slow emulators need significant time to flush buffers and finalize the video
+            print("⏳ Waiting for recording to finalize on device (this may take up to 45 seconds)...")
+            time.sleep(45)  # Increased from 30 to 45 seconds - critical for macOS-hosted emulators
+            
+            # Check if file exists on device with retries
+            print(f"🔍 Checking if recording file exists on device...")
+            file_found = False
+            file_size_bytes = 0
+            
+            for check_attempt in range(15):  # Increased from 10 to 15 attempts
+                check_result = self._run_adb_command(['shell', 'ls', '-lh', device_path], timeout=30)
+                if check_result and check_result.returncode == 0:
+                    file_info = check_result.stdout.strip()
+                    print(f"✅ Recording file found on device: {file_info}")
+                    
+                    # Extract file size to verify it's not empty or still being written
+                    try:
+                        # Parse size from ls output (format varies but size is typically 5th field)
+                        parts = file_info.split()
+                        if len(parts) >= 5:
+                            size_str = parts[4]
+                            # Convert human-readable size to bytes for comparison
+                            if 'K' in size_str:
+                                file_size_bytes = float(size_str.replace('K', '')) * 1024
+                            elif 'M' in size_str:
+                                file_size_bytes = float(size_str.replace('M', '')) * 1024 * 1024
+                            elif 'G' in size_str:
+                                file_size_bytes = float(size_str.replace('G', '')) * 1024 * 1024 * 1024
+                            else:
+                                try:
+                                    file_size_bytes = float(size_str)
+                                except:
+                                    file_size_bytes = 0
+                            
+                            print(f"   📊 File size: {size_str} ({file_size_bytes:.0f} bytes)")
+                            
+                            # File must be at least 1KB to be considered valid
+                            if file_size_bytes > 1024:
+                                file_found = True
+                                break
+                            else:
+                                print(f"   ⚠️  File too small ({file_size_bytes:.0f} bytes), may still be writing...")
+                    except Exception as parse_error:
+                        print(f"   ⚠️  Could not parse file size: {parse_error}")
                 
-                # Check if file exists and has size
-                if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
-                    file_size = os.path.getsize(local_path) / (1024 * 1024)  # MB
-                    print(f"✅ Recording saved: {local_path}")
-                    print(f"   File size: {file_size:.2f} MB")
+                if check_attempt < 14:
+                    wait_time = 5 if check_attempt < 7 else 10  # Increase wait time after 7 attempts
+                    print(f"   ⏳ File not ready yet, waiting {wait_time}s... (attempt {check_attempt + 1}/15)")
+                    time.sleep(wait_time)
+            
+            if not file_found:
+                print(f"⚠️  Recording file not found or invalid on device: {device_path}")
+                # Try to find any recent recordings as fallback
+                print("🔍 Searching for any screen recordings on device...")
+                search_result = self._run_adb_command(['shell', 'find', '/sdcard/', '-name', '*.mp4', '-type', 'f'], timeout=30)
+                if search_result and search_result.returncode == 0:
+                    print(f"   Found files:\n{search_result.stdout}")
+                return False
+            
+            # Create target directory if it doesn't exist
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            
+            # Pull the recording from device with aggressive retries
+            print(f"📥 Pulling recording from device...")
+            max_pull_attempts = 15  # Increased from 10 to 15
+            pull_successful = False
+            
+            for attempt in range(max_pull_attempts):
+                print(f"   Pull attempt {attempt + 1}/{max_pull_attempts}...")
+                
+                # Add a small delay before each pull attempt to ensure file is stable
+                if attempt > 0:
+                    time.sleep(5)
+                
+                # Use explicit adb pull command with longer timeout
+                result = self._run_adb_command(['pull', device_path, local_path], timeout=240)
+                
+                if result and result.returncode == 0:
+                    # Verify the pulled file actually has content
+                    if os.path.exists(local_path):
+                        local_size = os.path.getsize(local_path)
+                        if local_size > 1024:  # At least 1KB
+                            print(f"✅ Successfully pulled recording from device ({local_size} bytes)")
+                            pull_successful = True
+                            break
+                        else:
+                            print(f"⚠️  Pulled file is too small ({local_size} bytes), retrying...")
+                            try:
+                                os.remove(local_path)
+                            except:
+                                pass
+                    else:
+                        print(f"⚠️  Pulled file doesn't exist at {local_path}")
+                else:
+                    if result:
+                        error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+                        stdout_msg = result.stdout.strip() if result.stdout else ""
+                        print(f"⚠️  Pull attempt {attempt + 1} failed:")
+                        if error_msg:
+                            print(f"      Error: {error_msg}")
+                        if stdout_msg:
+                            print(f"      Output: {stdout_msg}")
+                    else:
+                        print(f"⚠️  Pull attempt {attempt + 1} failed: Command timeout")
+                
+                if attempt < max_pull_attempts - 1:
+                    wait_time = 5 if attempt < 7 else 10
+                    print(f"   ⏳ Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+            
+            if not pull_successful:
+                print("❌ Failed to pull recording after all attempts")
+                # Don't clean up device file - leave it for manual inspection
+                print(f"💡 Recording may still be on device at: {device_path}")
+                print("   You can manually pull it later with:")
+                print(f"   adb pull {device_path} {local_path}")
+                return False
+            
+            # Clean up device file
+            print("🧹 Cleaning up device file...")
+            self._run_adb_command(['shell', 'rm', device_path], timeout=30)
+            
+            # Verify local file exists and has content
+            if os.path.exists(local_path):
+                file_size = os.path.getsize(local_path)
+                if file_size > 0:
+                    file_size_mb = file_size / (1024 * 1024)  # MB
+                    print(f"✅ Recording saved successfully!")
+                    print(f"   📁 Location: {local_path}")
+                    print(f"   📊 File size: {file_size_mb:.2f} MB")
                     return True
                 else:
-                    print(f"⚠️  Recording file is empty or missing")
+                    print(f"⚠️  Recording file is empty (0 bytes): {local_path}")
                     return False
             else:
-                print(f"⚠️  Failed to pull recording from device")
+                print(f"⚠️  Recording file not found at: {local_path}")
                 return False
                 
         except Exception as e:
             print(f"⚠️  Error stopping ADB recording: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def stop_and_save_recording_appium(self):
@@ -320,7 +466,7 @@ class PlayStoreInstaller:
         options.full_reset = False
         # INCREASED timeouts for slow emulator APK installations (5+ minutes)
         options.new_command_timeout = 600
-        options.adb_exec_timeout = 180000  # Increased from 100000 to 180000 (3 minutes)
+        options.adb_exec_timeout = 240000  # Increased from 100000 to 240000 (4 minutes)
         options.uiautomator2_server_launch_timeout = 120000  # Increased from 60000 to 120000 (2 minutes)
         options.uiautomator2_server_install_timeout = 180000  # Increased from 60000 to 180000 (3 minutes)
         
@@ -462,10 +608,49 @@ class PlayStoreInstaller:
         """Open Google Play Store app"""
         print("🏪 Opening Google Play Store...")
         try:
-            os.system('adb shell am start -n com.android.vending/com.android.vending.AssetBrowserActivity')
+            # Try multiple methods to open Play Store
+            # Method 1: Open main Play Store activity (most reliable)
+            result = self._run_adb_command([
+                'shell', 'am', 'start', '-n', 
+                'com.android.vending/.AssetBrowserActivity'
+            ], timeout=10)
+            
+            # If that fails, try alternative activity
+            if not result or result.returncode != 0:
+                print("   ⚠️  AssetBrowserActivity failed, trying MainActivity...")
+                result = self._run_adb_command([
+                    'shell', 'am', 'start', '-n',
+                    'com.android.vending/com.google.android.finsky.activities.MainActivity'
+                ], timeout=10)
+            
+            # If both fail, try simple launch intent
+            if not result or result.returncode != 0:
+                print("   ⚠️  Explicit activities failed, trying launch intent...")
+                result = self._run_adb_command([
+                    'shell', 'am', 'start', '-a', 'android.intent.action.MAIN',
+                    '-c', 'android.intent.category.LAUNCHER',
+                    '-n', 'com.android.vending/com.android.vending.AssetBrowserActivity'
+                ], timeout=10)
+            
+            # Final fallback - just open the package
+            if not result or result.returncode != 0:
+                print("   ⚠️  All activities failed, trying package launch...")
+                result = self._run_adb_command([
+                    'shell', 'monkey', '-p', 'com.android.vending', '-c',
+                    'android.intent.category.LAUNCHER', '1'
+                ], timeout=10)
+            
             time.sleep(5)
-            print("✅ Play Store opened")
-            return True
+            
+            if result and result.returncode == 0:
+                print("✅ Play Store opened")
+                return True
+            else:
+                print("❌ Failed to open Play Store")
+                if result:
+                    print(f"   Error output: {result.stderr}")
+                return False
+                
         except Exception as e:
             print(f"❌ Failed to open Play Store: {e}")
             return False
@@ -828,10 +1013,32 @@ class PlayStoreInstaller:
             install_clicked = False
             install_texts = ["Install", "INSTALL", "Update", "UPDATE", "Open", "OPEN", "Get"]
             
-            for attempt in range(5):  # Try 5 times for better reliability
-                print(f"   Attempt {attempt + 1}/5:")
+            # CRITICAL FIX: Wait longer for app page to fully load after clicking from search results
+            print("   ⏳ Waiting for app detail page to fully load (15 seconds)...")
+            time.sleep(15)  # Increased from 5 to 15 seconds
+            
+            # Take a screenshot before trying to find Install button
+            self._take_debug_screenshot("before_install_button_search")
+            
+            for attempt in range(10):  # Increased from 5 to 10 attempts
+                print(f"   Attempt {attempt + 1}/10:")
+                
+                # First, verify we're on the app detail page
+                try:
+                    # Look for app name or package name on the page
+                    page_check = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
+                                                         'new UiSelector().textContains("Eptura")')
+                    print(f"      ✅ On app detail page (found: {page_check.text if hasattr(page_check, 'text') else 'Eptura'})")
+                except:
+                    print(f"      ⚠️  May not be on app detail page, retrying...")
+                    self._take_debug_screenshot(f"not_on_app_page_attempt_{attempt + 1}")
+                    time.sleep(5)
+                    continue
+                
+                # Try to find Install button with multiple strategies
                 for text in install_texts:
                     try:
+                        # Strategy 1: Text + Button class
                         install_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
                                                               f'new UiSelector().textContains("{text}").className("android.widget.Button")')
                         button_text = install_btn.text
@@ -846,41 +1053,94 @@ class PlayStoreInstaller:
                         print(f"      ✅ Clicked '{button_text}' button")
                         install_clicked = True
                         time.sleep(3)
-                        
-                        # Handle any confirmation dialogs
-                        print("      📱 Checking for confirmation dialogs...")
-                        try:
-                            continue_selectors = [
-                                'new UiSelector().textContains("Continue")',
-                                'new UiSelector().textContains("Accept")',
-                                'new UiSelector().textContains("OK")',
-                                'new UiSelector().textContains("Agree")'
-                            ]
-                            for selector in continue_selectors:
-                                try:
-                                    confirm_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
-                                    confirm_btn.click()
-                                    print(f"         ✅ Confirmed installation")
-                                    time.sleep(2)
-                                except:
-                                    pass
-                        except:
-                            pass
-                        
                         break
-                    except Exception as e:
-                        continue
+                    except:
+                        pass
+                    
+                    # Strategy 2: Just text match (no class restriction)
+                    try:
+                        install_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
+                                                              f'new UiSelector().text("{text}")')
+                        button_text = install_btn.text
+                        
+                        if button_text.upper() in ["OPEN"]:
+                            print(f"      ✅ App is already installed! (found '{button_text}' button)")
+                            print("="*70 + "\n")
+                            return True
+                        
+                        print(f"      🔍 Found '{button_text}' button (strategy 2)")
+                        install_btn.click()
+                        print(f"      ✅ Clicked '{button_text}' button")
+                        install_clicked = True
+                        time.sleep(3)
+                        break
+                    except:
+                        pass
+                    
+                    # Strategy 3: Use resource ID (for newer Play Store versions)
+                    try:
+                        install_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
+                                                              'new UiSelector().resourceIdMatches(".*install.*|.*action_button.*")')
+                        button_text = install_btn.text if hasattr(install_btn, 'text') else text
+                        
+                        if button_text and button_text.upper() in ["OPEN"]:
+                            print(f"      ✅ App is already installed! (found '{button_text}' button)")
+                            print("="*70 + "\n")
+                            return True
+                        
+                        print(f"      🔍 Found button via resource ID: '{button_text}'")
+                        install_btn.click()
+                        print(f"      ✅ Clicked button via resource ID")
+                        install_clicked = True
+                        time.sleep(3)
+                        break
+                    except:
+                        pass
                 
                 if install_clicked:
+                    # Handle any confirmation dialogs
+                    print("      📱 Checking for confirmation dialogs...")
+                    try:
+                        continue_selectors = [
+                            'new UiSelector().textContains("Continue")',
+                            'new UiSelector().textContains("Accept")',
+                            'new UiSelector().textContains("OK")',
+                            'new UiSelector().textContains("Agree")'
+                        ]
+                        for selector in continue_selectors:
+                            try:
+                                confirm_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+                                confirm_btn.click()
+                                print(f"         ✅ Confirmed installation")
+                                time.sleep(2)
+                            except:
+                                pass
+                    except:
+                        pass
                     break
-                    
-                if attempt < 4:
-                    print(f"   ⏳ Retrying after 3 seconds...")
-                    time.sleep(3)
+                
+                if attempt < 9:
+                    # Take screenshot before retry to see what's on screen
+                    self._take_debug_screenshot(f"install_button_not_found_attempt_{attempt + 1}")
+                    wait_time = 5 if attempt < 5 else 8  # Longer waits after 5 attempts
+                    print(f"   ⏳ Retrying after {wait_time} seconds...")
+                    time.sleep(wait_time)
             
             if not install_clicked:
                 print("   ❌ FAILED: Could not find or click Install button")
-                self._take_debug_screenshot("install_button_not_found")
+                self._take_debug_screenshot("install_button_not_found_final")
+                
+                # Last resort: Try to dump the UI hierarchy for debugging
+                try:
+                    print("   🔍 Attempting to get page source for debugging...")
+                    page_source = self.driver.page_source
+                    debug_file = os.path.join(os.getcwd(), 'playstore_screenshots', 'page_source_debug.xml')
+                    with open(debug_file, 'w', encoding='utf-8') as f:
+                        f.write(page_source)
+                    print(f"   📄 Page source saved to: {debug_file}")
+                except Exception as e:
+                    print(f"   ⚠️  Could not save page source: {e}")
+                
                 print("="*70 + "\n")
                 return False
             
