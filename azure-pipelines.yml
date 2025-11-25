@@ -119,27 +119,27 @@ stages:
               echo "📦 Updating SDK tools..."
               sdkmanager --update
               
-              # Install required components - try API 30 as fallback (more stable on CI)
-              echo "📦 Installing SDK components (trying API 30 for better stability)..."
+              # Use google_apis instead of playstore - more stable in CI
+              echo "📦 Installing SDK components (API 30 google_apis for CI stability)..."
               sdkmanager --install \
                 "platform-tools" \
                 "platforms;android-30" \
                 "build-tools;30.0.3" \
                 "emulator" \
-                "system-images;android-30;google_apis_playstore;x86_64"
+                "system-images;android-30;google_apis;x86_64"
               
               # Verify installation
               echo "🔍 Verifying system images..."
               sdkmanager --list_installed | grep system-images
               
               # Create AVD with optimal settings for CI
-              echo "📱 Creating emulator AVD (API 30 for stability)..."
+              echo "📱 Creating emulator AVD (API 30 google_apis)..."
               echo "no" | avdmanager create avd \
                 --force \
                 --name "ci_emulator" \
-                --package "system-images;android-30;google_apis_playstore;x86_64" \
+                --package "system-images;android-30;google_apis;x86_64" \
                 --device "pixel_4" \
-                --tag "google_apis_playstore"
+                --tag "google_apis"
               
               # Configure AVD for better performance
               AVD_PATH="$HOME/.android/avd/ci_emulator.avd"
@@ -152,7 +152,7 @@ stages:
               hw.gpu.enabled=yes
               hw.gpu.mode=swiftshader_indirect
               disk.dataPartition.size=6G
-              fastboot.forceColdBoot=no
+              fastboot.forceColdBoot=yes
               hw.camera.back=none
               hw.camera.front=none
               EOF
@@ -163,14 +163,20 @@ stages:
             displayName: 'Setup Android SDK and AVD'
 
           - bash: |
-              echo "🚀 Starting Android Emulator with OPTIMIZED BOOT..."
+              echo "🚀 Starting Android Emulator with ROBUST OFFLINE RECOVERY..."
               echo "============================================================================"
               
               export ANDROID_HOME=$ANDROID_SDK_ROOT
               export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
               
-              # Start ADB server FIRST (before emulator) to avoid offline state issues
-              echo "Starting ADB server early..."
+              # Clean ADB completely
+              echo "🧹 Cleaning ADB state..."
+              $ANDROID_HOME/platform-tools/adb kill-server || true
+              rm -rf ~/.android/adb* 2>/dev/null || true
+              sleep 2
+              
+              # Start ADB server fresh
+              echo "🔧 Starting ADB server..."
               $ANDROID_HOME/platform-tools/adb start-server
               sleep 3
               
@@ -185,7 +191,7 @@ stages:
               KVM = off
               EOF
               
-              # Start emulator with optimized flags - use -wipe-data for faster clean boot
+              # Start emulator - REMOVED -wipe-data to prevent offline state
               echo "Starting emulator in background..."
               $ANDROID_HOME/emulator/emulator \
                 -avd ci_emulator \
@@ -193,8 +199,7 @@ stages:
                 -no-audio \
                 -no-boot-anim \
                 -gpu swiftshader_indirect \
-                -no-snapshot \
-                -wipe-data \
+                -no-snapshot-save \
                 -memory 4096 \
                 -cores 2 \
                 -camera-back none \
@@ -210,17 +215,16 @@ stages:
               
               # Wait for emulator to appear in ADB
               echo "⏳ Waiting for emulator to appear in ADB..."
-              sleep 10
+              sleep 15
               
-              # Optimized boot wait logic - less aggressive polling
-              echo "⏳ Waiting for emulator to boot (max 8 minutes)..."
+              # Enhanced boot wait with aggressive offline recovery
+              echo "⏳ Waiting for emulator to boot (max 10 minutes)..."
               
-              TIMEOUT=480
+              TIMEOUT=600
               ELAPSED=0
               BOOT_COMPLETE=false
-              DEVICE_ONLINE=false
-              ADB_RESTART_COUNT=0
-              MAX_ADB_RESTARTS=2
+              OFFLINE_RECOVERY_ATTEMPTS=0
+              MAX_OFFLINE_RECOVERIES=5
               
               while [ $ELAPSED -lt $TIMEOUT ]; do
                 # Check emulator process health
@@ -234,25 +238,7 @@ stages:
                 # Get device state
                 DEVICE_STATE=$($ANDROID_HOME/platform-tools/adb devices | grep emulator | awk '{print $2}')
                 
-                # Only restart ADB if really needed and not too many times
-                if [ -z "$DEVICE_STATE" ] && [ $ELAPSED -gt 120 ] && [ $ADB_RESTART_COUNT -lt $MAX_ADB_RESTARTS ]; then
-                  if [ $((ELAPSED % 120)) -eq 0 ]; then
-                    echo "⚠️  No device found after 2+ minutes, restarting ADB (attempt $((ADB_RESTART_COUNT + 1))/$MAX_ADB_RESTARTS)..."
-                    $ANDROID_HOME/platform-tools/adb kill-server
-                    sleep 2
-                    $ANDROID_HOME/platform-tools/adb start-server
-                    sleep 3
-                    ADB_RESTART_COUNT=$((ADB_RESTART_COUNT + 1))
-                    $ANDROID_HOME/platform-tools/adb devices
-                  fi
-                fi
-                
                 if [ "$DEVICE_STATE" = "device" ]; then
-                  if [ "$DEVICE_ONLINE" = false ]; then
-                    echo "✅ Device is online at ${ELAPSED}s!"
-                    DEVICE_ONLINE=true
-                  fi
-                  
                   # Check boot completion
                   BOOT_STATUS=$($ANDROID_HOME/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed 2>&1 | tr -d '\r\n')
                   
@@ -261,26 +247,53 @@ stages:
                     BOOT_COMPLETE=true
                     break
                   fi
+                  
+                  # Progress for online device
+                  if [ $((ELAPSED % 20)) -eq 0 ]; then
+                    echo "  Status: device (booting...) | Time: ${ELAPSED}s / ${TIMEOUT}s"
+                  fi
+                  
                 elif [ "$DEVICE_STATE" = "offline" ]; then
-                  # Device offline - wait longer before trying recovery (only once)
-                  if [ $ELAPSED -gt 120 ] && [ $ADB_RESTART_COUNT -lt $MAX_ADB_RESTARTS ]; then
-                    if [ $((ELAPSED % 120)) -eq 0 ]; then
-                      echo "⚠️  Device stuck offline, attempting recovery (attempt $((ADB_RESTART_COUNT + 1))/$MAX_ADB_RESTARTS)..."
-                      $ANDROID_HOME/platform-tools/adb kill-server
-                      sleep 2
-                      $ANDROID_HOME/platform-tools/adb start-server
-                      sleep 3
-                      ADB_RESTART_COUNT=$((ADB_RESTART_COUNT + 1))
+                  # AGGRESSIVE OFFLINE RECOVERY
+                  if [ $OFFLINE_RECOVERY_ATTEMPTS -lt $MAX_OFFLINE_RECOVERIES ]; then
+                    echo "⚠️  Device OFFLINE - Applying recovery #$((OFFLINE_RECOVERY_ATTEMPTS + 1))..."
+                    
+                    # Method 1: Kill and restart ADB
+                    $ANDROID_HOME/platform-tools/adb kill-server
+                    sleep 2
+                    $ANDROID_HOME/platform-tools/adb start-server
+                    sleep 3
+                    
+                    # Method 2: Try to reconnect the device
+                    $ANDROID_HOME/platform-tools/adb reconnect emulator-5554 2>/dev/null || true
+                    sleep 2
+                    
+                    # Method 3: Force device online with adb wait-for-device
+                    timeout 10 $ANDROID_HOME/platform-tools/adb -s emulator-5554 wait-for-device 2>/dev/null || true
+                    
+                    OFFLINE_RECOVERY_ATTEMPTS=$((OFFLINE_RECOVERY_ATTEMPTS + 1))
+                    
+                    # Check if recovery worked
+                    sleep 5
+                    NEW_STATE=$($ANDROID_HOME/platform-tools/adb devices | grep emulator | awk '{print $2}')
+                    if [ "$NEW_STATE" = "device" ]; then
+                      echo "✅ Recovery successful! Device is now online."
+                    else
+                      echo "  Still offline, will retry... ($OFFLINE_RECOVERY_ATTEMPTS/$MAX_OFFLINE_RECOVERIES)"
                     fi
+                  else
+                    # All recovery attempts exhausted
+                    if [ $((ELAPSED % 20)) -eq 0 ]; then
+                      echo "  Status: offline (max recoveries reached) | Time: ${ELAPSED}s / ${TIMEOUT}s"
+                    fi
+                  fi
+                else
+                  # Device not found
+                  if [ $((ELAPSED % 20)) -eq 0 ]; then
+                    echo "  Status: not detected | Time: ${ELAPSED}s / ${TIMEOUT}s"
                   fi
                 fi
                 
-                # Progress updates every 20 seconds (less verbose)
-                if [ $((ELAPSED % 20)) -eq 0 ]; then
-                  echo "  Status: ${DEVICE_STATE:-none} | Time: ${ELAPSED}s / ${TIMEOUT}s"
-                fi
-                
-                # Poll every 10 seconds instead of 5 (reduce overhead)
                 sleep 10
                 ELAPSED=$((ELAPSED + 10))
               done
@@ -291,23 +304,29 @@ stages:
                 echo "=== Final Device Status ==="
                 $ANDROID_HOME/platform-tools/adb devices -l
                 echo ""
-                echo "=== Emulator Log (last 200 lines) ==="
-                tail -200 emulator.log
+                echo "=== ADB Server Status ==="
+                ps aux | grep adb | grep -v grep || echo "No ADB process found"
+                echo ""
+                echo "=== Emulator Process Status ==="
+                ps aux | grep emulator | grep -v grep || echo "No emulator process found"
+                echo ""
+                echo "=== Emulator Log (last 300 lines) ==="
+                tail -300 emulator.log
                 exit 1
               fi
               
-              # Minimal post-boot stabilization
-              echo "⏳ Waiting for system stability (5s)..."
-              sleep 5
+              # Post-boot stabilization
+              echo "⏳ Waiting for system stability (10s)..."
+              sleep 10
               
-              # Quick package manager check
+              # Verify package manager
               echo "⏳ Verifying package manager..."
-              for i in {1..15}; do
+              for i in {1..20}; do
                 if $ANDROID_HOME/platform-tools/adb -s emulator-5554 shell pm path android > /dev/null 2>&1; then
                   echo "✅ Package manager ready!"
                   break
                 fi
-                sleep 1
+                sleep 2
               done
               
               # Performance optimizations
@@ -325,14 +344,6 @@ stages:
               echo "Android Version: $($ANDROID_HOME/platform-tools/adb -s emulator-5554 shell getprop ro.build.version.release | tr -d '\r\n')"
               echo "API Level: $($ANDROID_HOME/platform-tools/adb -s emulator-5554 shell getprop ro.build.version.sdk | tr -d '\r\n')"
               echo "Device Model: $($ANDROID_HOME/platform-tools/adb -s emulator-5554 shell getprop ro.product.model | tr -d '\r\n')"
-              
-              # Check Google Play availability
-              if $ANDROID_HOME/platform-tools/adb -s emulator-5554 shell pm list packages 2>/dev/null | grep -q "com.android.vending"; then
-                echo "✅ Google Play Store: AVAILABLE"
-              else
-                echo "⚠️  Google Play Store: NOT FOUND (will need APK file for app installation)"
-              fi
-              
               echo "============================================================================"
               echo "🎉 Ready for test execution!"
               
