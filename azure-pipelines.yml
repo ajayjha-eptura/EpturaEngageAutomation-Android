@@ -1,4 +1,4 @@
-# Azure Pipeline for Eptura Engage Android Automation
+﻿# Azure Pipeline for Eptura Engage Android Automation
 # Consolidated version with proven emulator startup and comprehensive features
 
 trigger:
@@ -482,31 +482,26 @@ stages:
               mkdir -p playstore_screenshots
               mkdir -p playstore-recordings
               
-              # Set Python command
-              if command -v python3 &> /dev/null; then
-                PYTHON_CMD=python3
-              else
-                PYTHON_CMD=python
-              fi
-              
-              echo "🐍 Python command: $PYTHON_CMD"
+              # ENHANCED: Use video recording wrapper script for full capture
               echo ""
-              echo "────────────────────────────────────────────────────────────────────"
-              echo "📱 The script will perform the following steps:"
-              echo "   1. Open Google Play Store"
-              echo "   2. Login with provided Google account credentials"
-              echo "   3. Search for 'Eptura Engage' app"
-              echo "   4. Click Install button"
-              echo "   5. Wait for installation to complete"
-              echo "   6. Verify app is installed"
-              echo "────────────────────────────────────────────────────────────────────"
+              echo "╔═══════════════════════════════════════════════════════════════════╗"
+              echo "🎥 USING VIDEO RECORDING WRAPPER FOR FULL DEBUGGING CAPTURE"
+              echo "╚═══════════════════════════════════════════════════════════════════╝"
               echo ""
-              
-              # Run Play Store installation with full output
-              echo "🚀 Starting automated Play Store installation..."
+              echo "🔹 This will record the entire installation process including:"
+              echo "   • Play Store opening and navigation"
+              echo "   • Google account login (if required)"
+              echo "   • App search and results"
+              echo "   • Install button interaction"
+              echo "   • Installation progress"
+              echo "   • Final verification"
               echo ""
-              
-              $PYTHON_CMD src/main/resources/install_from_playstore.py "$GOOGLE_EMAIL" "$GOOGLE_PASSWORD" "Eptura Engage"
+
+              # Make script executable
+              chmod +x scripts/record_playstore_installation.sh
+
+              # Run installation with full video recording
+              ./scripts/record_playstore_installation.sh "\$GOOGLE_EMAIL" "\$GOOGLE_PASSWORD" "Eptura Engage"
               INSTALL_RESULT=$?
               
               echo ""
@@ -518,6 +513,7 @@ stages:
                 echo "✅✅✅ PLAY STORE INSTALLATION SUCCESSFUL! ✅✅✅"
                 echo "   Package: $PACKAGE_NAME"
                 echo "   Method: Google Play Store"
+                echo "   Video: Available in playstore-recordings/"
                 echo "════════════════════════════════════════════════════════════════════"
                 exit 0
               else
@@ -526,7 +522,8 @@ stages:
                 echo "   Package searched: $PACKAGE_NAME"
                 echo ""
                 echo "📸 Debug screenshots saved to: playstore_screenshots/"
-                echo "🎥 Video recordings saved to: playstore-recordings/"
+                echo "🎥 Video recording saved to: playstore-recordings/"
+                echo "   ⚠️  REVIEW THE VIDEO to see what went wrong!"
                 echo "════════════════════════════════════════════════════════════════════"
                 exit 1
               fi
