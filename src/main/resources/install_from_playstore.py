@@ -615,7 +615,7 @@ class PlayStoreInstaller:
         
         try:
             # Click on search icon
-            print("\n[Step 1/5] Opening search interface...")
+            print("\n[Step 1/6] Opening search interface...")
             search_selectors = [
                 ('search_bar_hint', 'new UiSelector().resourceId("com.android.vending:id/search_bar_hint")'),
                 ('search_box_idle_text', 'new UiSelector().resourceId("com.android.vending:id/search_box_idle_text")'),
@@ -642,8 +642,8 @@ class PlayStoreInstaller:
                 print("   ⚠️  Could not open search, trying to proceed anyway")
                 self._take_debug_screenshot("search_open_failed")
             
-            # Enter app name in search field
-            print(f"\n[Step 2/5] Entering search text: '{app_name}'...")
+            # Step 2: Type "Eptura Engage" in search field
+            print(f"\n[Step 2/6] Typing search text: '{app_name}'...")
             search_field_selectors = [
                 ('search_bar_text_input', 'new UiSelector().resourceId("com.android.vending:id/search_bar_text_input")'),
                 ('search_box_text_input', 'new UiSelector().resourceId("com.android.vending:id/search_box_text_input")'),
@@ -652,16 +652,17 @@ class PlayStoreInstaller:
             ]
             
             text_entered = False
-            search_field = None
             for selector_name, selector in search_field_selectors:
                 try:
                     print(f"   🔍 Trying selector: {selector_name}")
                     search_field = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
                     search_field.clear()
                     time.sleep(1)
+                    # Type the app name character by character for better reliability
+                    print(f"   ⌨️  Typing '{app_name}'...")
                     search_field.send_keys(app_name)
                     text_entered = True
-                    print(f"   ✅ Text entered successfully using: {selector_name}")
+                    print(f"   ✅ Text typed successfully: '{app_name}'")
                     time.sleep(2)
                     break
                 except Exception as e:
@@ -669,96 +670,52 @@ class PlayStoreInstaller:
                     continue
             
             if not text_entered:
-                print("   ❌ FAILED: Could not enter search text")
+                print("   ❌ FAILED: Could not type search text")
                 self._take_debug_screenshot("search_text_entry_failed")
                 print("="*70 + "\n")
                 return False
             
-            # Press Enter or click search button - try multiple methods
-            print("\n[Step 3/5] Executing search (trying multiple methods)...")
+            # Step 3: Press search button from keyboard (Enter key)
+            print(f"\n[Step 3/6] Pressing search button from keyboard...")
             search_executed = False
             
-            # Method 1: Try to press Enter key via Appium driver
-            if not search_executed:
-                try:
-                    print("   🔍 Method 1: Appium press_keycode(66)")
-                    self.driver.press_keycode(66)  # KEYCODE_ENTER
-                    print("   ✅ Pressed Enter key via press_keycode")
-                    search_executed = True
-                    time.sleep(5)  # Wait for search results
-                except Exception as e:
-                    print(f"   ⚠️  Method 1 failed: {str(e)[:80]}")
+            # Primary method: Press Enter key from keyboard using Appium
+            try:
+                print("   ⌨️  Pressing Enter key (KEYCODE_ENTER)...")
+                self.driver.press_keycode(66)  # KEYCODE_ENTER - simulates keyboard search button
+                print("   ✅ Search button pressed from keyboard")
+                search_executed = True
+                print("   ⏳ Waiting for search results to load...")
+                time.sleep(5)
+            except Exception as e:
+                print(f"   ⚠️  Appium press_keycode failed: {str(e)[:80]}")
             
-            # Method 2: Try to press Enter using ADB directly
+            # Fallback: Use ADB to press Enter key
             if not search_executed:
                 try:
-                    print("   🔍 Method 2: ADB input keyevent ENTER")
+                    print("   ⌨️  Trying ADB input keyevent ENTER...")
                     result = self._run_adb_command(['shell', 'input', 'keyevent', 'KEYCODE_ENTER'])
                     if result and result.returncode == 0:
-                        print("   ✅ Pressed Enter key via ADB input keyevent")
+                        print("   ✅ Search button pressed via ADB")
                         search_executed = True
+                        print("   ⏳ Waiting for search results to load...")
                         time.sleep(5)
                     else:
-                        print(f"   ⚠️  Method 2 failed with return code: {result.returncode if result else 'None'}")
+                        print(f"   ⚠️  ADB keyevent failed")
                 except Exception as e:
-                    print(f"   ⚠️  Method 2 exception: {str(e)[:80]}")
-            
-            # Method 3: Try to click on search button/icon
-            if not search_executed:
-                print("   🔍 Method 3: Click search button")
-                search_button_selectors = [
-                    ('Search description', 'new UiSelector().descriptionContains("Search")'),
-                    ('search_button', 'new UiSelector().resourceId("com.android.vending:id/search_button")'),
-                    ('ImageButton Search', 'new UiSelector().className("android.widget.ImageButton").descriptionContains("Search")'),
-                    ('action_button', 'new UiSelector().resourceId("com.android.vending:id/action_button")')
-                ]
-                
-                for selector_name, selector in search_button_selectors:
-                    try:
-                        print(f"      Trying: {selector_name}")
-                        search_button = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
-                        search_button.click()
-                        print(f"   ✅ Clicked search button using: {selector_name}")
-                        search_executed = True
-                        time.sleep(5)
-                        break
-                    except:
-                        continue
-            
-            # Method 4: Try sending newline character directly to the field
-            if not search_executed and search_field:
-                try:
-                    print("   🔍 Method 4: Send ENTER key to search field")
-                    from selenium.webdriver.common.keys import Keys
-                    search_field.send_keys(Keys.ENTER)
-                    print("   ✅ Sent ENTER key via send_keys")
-                    search_executed = True
-                    time.sleep(5)
-                except Exception as e:
-                    print(f"   ⚠️  Method 4 failed: {str(e)[:80]}")
-            
-            # Method 5: Try using ADB input text with newline
-            if not search_executed:
-                try:
-                    print("   🔍 Method 5: ADB keycode 66")
-                    result = self._run_adb_command(['shell', 'input', 'keyevent', '66'])
-                    if result and result.returncode == 0:
-                        print("   ✅ Pressed Enter key via ADB keycode 66")
-                        search_executed = True
-                        time.sleep(5)
-                    else:
-                        print(f"   ⚠️  Method 5 failed with return code: {result.returncode if result else 'None'}")
-                except Exception as e:
-                    print(f("   ⚠️  Method 5 exception: {str(e)[:80]}")
+                    print(f"   ⚠️  ADB method failed: {str(e)[:80]}")
             
             if not search_executed:
-                print("   ⚠️  Could not execute search via any method, but will try to proceed")
-                self._take_debug_screenshot("search_execution_failed")
-                time.sleep(3)  # Give it a moment in case search auto-executed
+                print("   ⚠️  Could not press search button, trying to proceed anyway")
+                self._take_debug_screenshot("search_button_press_failed")
+                time.sleep(3)
             
-            # Click on the app from search results
-            print(f"\n[Step 4/5] Selecting '{app_name}' from results...")
+            # Step 4: Wait for and click on the Eptura Engage app from search results
+            print(f"\n[Step 4/6] Selecting '{app_name}' from search results...")
             app_clicked = False
+            
+            # Wait a bit more for results to fully load
+            time.sleep(3)
             
             # Try multiple ways to find and click the app
             app_selectors = [
@@ -771,11 +728,12 @@ class PlayStoreInstaller:
             
             for selector_name, selector in app_selectors:
                 try:
-                    print(f"   🔍 Trying selector: {selector_name}")
+                    print(f"   🔍 Looking for app with: {selector_name}")
                     app_item = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
                     app_name_found = app_item.text if hasattr(app_item, 'text') else selector_name
+                    print(f"   ✅ Found app: '{app_name_found}'")
                     app_item.click()
-                    print(f"   ✅ App clicked using: {selector_name} ('{app_name_found}')")
+                    print(f"   ✅ Clicked on '{app_name_found}'")
                     time.sleep(5)
                     app_clicked = True
                     break
@@ -788,16 +746,15 @@ class PlayStoreInstaller:
                 self._take_debug_screenshot("app_not_found_in_results")
                 print("   Trying to continue anyway...")
             
-            # Click Install button - try multiple times with different selectors
-            print(f"\n[Step 5/5] Looking for and clicking Install button...")
+            # Step 5: Click Install button
+            print(f"\n[Step 5/6] Clicking Install button...")
             install_clicked = False
             install_texts = ["Install", "INSTALL", "Update", "UPDATE", "Open", "OPEN", "Get"]
             
-            for attempt in range(3):  # Try 3 times
-                print(f"   Attempt {attempt + 1}/3:")
+            for attempt in range(5):  # Try 5 times for better reliability
+                print(f"   Attempt {attempt + 1}/5:")
                 for text in install_texts:
                     try:
-                        print(f"      🔍 Looking for '{text}' button")
                         install_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
                                                               f'new UiSelector().textContains("{text}").className("android.widget.Button")')
                         button_text = install_btn.text
@@ -807,6 +764,7 @@ class PlayStoreInstaller:
                             print("="*70 + "\n")
                             return True
                         
+                        print(f"      🔍 Found '{button_text}' button")
                         install_btn.click()
                         print(f"      ✅ Clicked '{button_text}' button")
                         install_clicked = True
@@ -818,7 +776,8 @@ class PlayStoreInstaller:
                             continue_selectors = [
                                 'new UiSelector().textContains("Continue")',
                                 'new UiSelector().textContains("Accept")',
-                                'new UiSelector().textContains("OK")'
+                                'new UiSelector().textContains("OK")',
+                                'new UiSelector().textContains("Agree")'
                             ]
                             for selector in continue_selectors:
                                 try:
@@ -833,13 +792,12 @@ class PlayStoreInstaller:
                         
                         break
                     except Exception as e:
-                        print(f"      ⚠️  '{text}' not found: {str(e)[:60]}")
                         continue
                 
                 if install_clicked:
                     break
                     
-                if attempt < 2:
+                if attempt < 4:
                     print(f"   ⏳ Retrying after 3 seconds...")
                     time.sleep(3)
             
@@ -849,39 +807,59 @@ class PlayStoreInstaller:
                 print("="*70 + "\n")
                 return False
             
-            # Wait for installation to complete with better verification
-            print("\n⏳ Waiting for installation to complete...")
-            print("   Checking both UI and package manager...")
+            # Step 6: Wait until installation is complete
+            print(f"\n[Step 6/6] Waiting for installation to complete...")
+            print("   ⏳ Monitoring installation progress...")
+            print("   (This may take several minutes depending on app size and network speed)")
             max_wait = 300  # 5 minutes
             wait_time = 0
             check_interval = 10
+            last_status = ""
             
             while wait_time < max_wait:
-                # Method 1: Check for "Open" button in UI
+                # Check for "Open" button - indicates installation is complete
                 try:
                     open_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
                                                        'new UiSelector().text("Open").className("android.widget.Button")')
                     print(f"\n✅ INSTALLATION COMPLETED SUCCESSFULLY!")
                     print(f"   Total time: {wait_time} seconds")
-                    print("   Method: Open button detected in UI")
+                    print(f"   Status: Open button detected - app is installed")
                     print("="*70 + "\n")
                     return True
                 except:
                     pass
                 
-                # Method 2: Check package manager directly
+                # Check for progress indicators to show user what's happening
                 try:
-                    import subprocess
-                    result = subprocess.run(['adb', 'shell', 'pm', 'list', 'packages', 'com.condecosoftware.condeco'],
-                                          capture_output=True, text=True, timeout=5)
-                    if 'com.condecosoftware.condeco' in result.stdout:
-                        print(f"\n✅ INSTALLATION COMPLETED SUCCESSFULLY!")
-                        print(f"   Total time: {wait_time} seconds")
-                        print("   Method: Package detected in package manager")
-                        print("="*70 + "\n")
-                        return True
+                    progress_selectors = [
+                        'new UiSelector().textContains("Installing")',
+                        'new UiSelector().textContains("Downloading")',
+                        'new UiSelector().textContains("Pending")',
+                        'new UiSelector().textContains("%")',
+                        'new UiSelector().resourceId("com.android.vending:id/progress_bar")'
+                    ]
+                    
+                    for selector in progress_selectors:
+                        try:
+                            progress_elem = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+                            status_text = progress_elem.text if hasattr(progress_elem, 'text') else "In progress"
+                            if status_text and status_text != last_status:
+                                print(f"   📥 Status: {status_text}")
+                                last_status = status_text
+                            break
+                        except:
+                            continue
                 except:
                     pass
+                
+                # Also check package manager directly
+                result = self._run_adb_command(['shell', 'pm', 'list', 'packages', 'com.condecosoftware.condeco'], timeout=10)
+                if result and 'com.condecosoftware.condeco' in result.stdout:
+                    print(f"\n✅ INSTALLATION COMPLETED SUCCESSFULLY!")
+                    print(f"   Total time: {wait_time} seconds")
+                    print(f"   Status: App package detected in device package manager")
+                    print("="*70 + "\n")
+                    return True
                 
                 time.sleep(check_interval)
                 wait_time += check_interval
@@ -889,11 +867,21 @@ class PlayStoreInstaller:
                 if wait_time % 30 == 0:
                     print(f"   ⏳ Still installing... ({wait_time}/{max_wait} seconds)")
             
-            print(f"\n❌ INSTALLATION TIMEOUT - App was not installed after {max_wait} seconds")
+            # Final verification after timeout
+            print(f"\n⚠️  Installation timeout reached after {max_wait} seconds")
+            print("   🔍 Performing final verification...")
+            time.sleep(10)
+            
+            result = self._run_adb_command(['shell', 'pm', 'list', 'packages', 'com.condecosoftware.condeco'], timeout=10)
+            if result and 'com.condecosoftware.condeco' in result.stdout:
+                print("✅ Installation verified via package manager!")
+                print("="*70 + "\n")
+                return True
+            
+            print("❌ Installation failed - app was not installed within timeout period")
             self._take_debug_screenshot("installation_timeout")
             print("="*70 + "\n")
             return False
-            
         except Exception as e:
             print(f"\n❌ CRITICAL ERROR during app installation: {e}")
             print(f"   Exception type: {type(e).__name__}")
@@ -1021,6 +1009,7 @@ class PlayStoreInstaller:
                     progress_selectors = [
                         'new UiSelector().textContains("Installing")',
                         'new UiSelector().textContains("Downloading")',
+                        'new UiSelector().textContains("Pending")',
                         'new UiSelector().textContains("%")',
                         'new UiSelector().resourceId("com.android.vending:id/progress_bar")'
                     ]

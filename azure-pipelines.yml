@@ -438,65 +438,92 @@ stages:
                 exit 0
               fi
               
-              # Method 1: Check for APK in repo
-              echo "🔍 Looking for APK file in repository..."
-              if [ -f "app/Eptura_Engage.apk" ] || [ -f "Eptura_Engage.apk" ]; then
-                APK_PATH=$(find . -name "Eptura_Engage.apk" -o -name "condeco.apk" | head -1)
-                echo "✅ Found APK: $APK_PATH"
-                
-                # Verify device is still ready before install
-                if "$ADB" shell getprop sys.boot_completed 2>/dev/null | grep -q "1"; then
-                  echo "📦 Installing APK..."
-                  "$ADB" install -r "$APK_PATH"
-                  if [ $? -eq 0 ]; then
-                    echo "✅ APK installed successfully!"
-                    exit 0
-                  else
-                    echo "⚠️  APK installation failed, trying Play Store method..."
-                  fi
-                else
-                  echo "⚠️  Device went offline before APK install!"
-                fi
-              else
-                echo "⚠️  No APK file found in repository"
-              fi
-              
-              # Method 2: Use Python script for Play Store
-              if [ -f "src/main/resources/install_from_playstore.py" ]; then
-                echo "📦 Attempting Play Store installation..."
-                
-                # Verify device is still ready
-                if ! "$ADB" shell getprop sys.boot_completed 2>/dev/null | grep -q "1"; then
-                  echo "⚠️  Device offline, waiting 10s for recovery..."
-                  sleep 10
-                fi
-                
-                # Create screenshot directory for debugging
-                mkdir -p playstore_screenshots
-                
-                # Set Python command
-                if command -v python3 &> /dev/null; then
-                  PYTHON_CMD=python3
-                else
-                  PYTHON_CMD=python
-                fi
-                
-                $PYTHON_CMD src/main/resources/install_from_playstore.py || {
-                  echo "⚠️ Play Store installation had issues but continuing..."
-                }
-                
-                # Verify installation
-                if "$ADB" shell pm list packages 2>/dev/null | grep -q "$PACKAGE_NAME"; then
-                  echo "✅ Play Store installation successful!"
-                  exit 0
-                fi
-              fi
-              
-              echo "❌ Could not install app - please provide APK file or configure Play Store credentials"
+              # ========================================================================
+              # GOOGLE PLAY STORE INSTALLATION
+              # ========================================================================
               echo ""
-              echo "=== Final Device Status ==="
-              "$ADB" devices -l
-              exit 1
+              echo "════════════════════════════════════════════════════════════════════"
+              echo "🏪 STARTING GOOGLE PLAY STORE INSTALLATION PROCESS"
+              echo "════════════════════════════════════════════════════════════════════"
+              echo ""
+              
+              # Verify Python script exists
+              if [ ! -f "src/main/resources/install_from_playstore.py" ]; then
+                echo "❌ ERROR: Play Store installation script not found!"
+                echo "   Expected location: src/main/resources/install_from_playstore.py"
+                exit 1
+              fi
+              
+              # Verify credentials are available
+              if [ -z "$GOOGLE_EMAIL" ] || [ -z "$GOOGLE_PASSWORD" ]; then
+                echo "❌ ERROR: Google Play Store credentials not configured!"
+                echo "   Please configure GOOGLE_PLAY_EMAIL and GOOGLE_PLAY_PASSWORD variables"
+                exit 1
+              fi
+              
+              echo "✅ Play Store installation script found"
+              echo "✅ Google credentials configured"
+              echo "📧 Using account: ${GOOGLE_EMAIL:0:3}***@***"
+              echo ""
+              
+              # Verify device is still ready
+              if ! "$ADB" shell getprop sys.boot_completed 2>/dev/null | grep -q "1"; then
+                echo "⚠️  Device offline, waiting 10s for recovery..."
+                sleep 10
+              fi
+              
+              # Create directories for debugging artifacts
+              mkdir -p playstore_screenshots
+              mkdir -p playstore-recordings
+              
+              # Set Python command
+              if command -v python3 &> /dev/null; then
+                PYTHON_CMD=python3
+              else
+                PYTHON_CMD=python
+              fi
+              
+              echo "🐍 Python command: $PYTHON_CMD"
+              echo ""
+              echo "────────────────────────────────────────────────────────────────────"
+              echo "📱 The script will perform the following steps:"
+              echo "   1. Open Google Play Store"
+              echo "   2. Login with provided Google account credentials"
+              echo "   3. Search for 'Eptura Engage' app"
+              echo "   4. Click Install button"
+              echo "   5. Wait for installation to complete"
+              echo "   6. Verify app is installed"
+              echo "────────────────────────────────────────────────────────────────────"
+              echo ""
+              
+              # Run Play Store installation with full output
+              echo "🚀 Starting automated Play Store installation..."
+              echo ""
+              
+              $PYTHON_CMD src/main/resources/install_from_playstore.py "$GOOGLE_EMAIL" "$GOOGLE_PASSWORD" "Eptura Engage"
+              INSTALL_RESULT=$?
+              
+              echo ""
+              echo "════════════════════════════════════════════════════════════════════"
+              
+              # Verify installation
+              echo "🔍 Verifying installation in package manager..."
+              if "$ADB" shell pm list packages 2>/dev/null | grep -q "$PACKAGE_NAME"; then
+                echo "✅✅✅ PLAY STORE INSTALLATION SUCCESSFUL! ✅✅✅"
+                echo "   Package: $PACKAGE_NAME"
+                echo "   Method: Google Play Store"
+                echo "════════════════════════════════════════════════════════════════════"
+                exit 0
+              else
+                echo "❌ INSTALLATION FAILED"
+                echo "   App package not found in device package manager"
+                echo "   Package searched: $PACKAGE_NAME"
+                echo ""
+                echo "📸 Debug screenshots saved to: playstore_screenshots/"
+                echo "🎥 Video recordings saved to: playstore-recordings/"
+                echo "════════════════════════════════════════════════════════════════════"
+                exit 1
+              fi
             displayName: 'Install Eptura Engage App'
             continueOnError: true
             env:
