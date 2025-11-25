@@ -448,8 +448,8 @@ stages:
             displayName: 'Install Eptura Engage App'
             continueOnError: true
             env:
-              GOOGLE_EMAIL: $(GOOGLE_EMAIL)
-              GOOGLE_PASSWORD: $(GOOGLE_PASSWORD)
+              GOOGLE_EMAIL: $(GOOGLE_PLAY_EMAIL)
+              GOOGLE_PASSWORD: $(GOOGLE_PLAY_PASSWORD)
 
           - task: PublishBuildArtifacts@1
             displayName: 'Publish Play Store Screenshots'
