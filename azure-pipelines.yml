@@ -416,21 +416,21 @@ stages:
                   -wipe-data \
                   > emulator.log 2>&1 &
               else
-                # x86_64 emulator - use software rendering for Azure CI stability
+                # x86_64 emulator - optimized for Azure CI with limited resources
                 echo "Starting x86_64 emulator with software rendering (Azure CI optimized)..."
                 nohup "$EMULATOR" -avd $(emulatorName) \
                   -no-snapshot-save \
+                  -no-snapshot-load \
                   -no-window \
                   -no-audio \
                   -no-boot-anim \
                   -gpu swiftshader_indirect \
-                  -accel auto \
-                  -memory 3072 \
+                  -memory 2048 \
                   -cores 2 \
+                  -skin 1080x1920 \
                   -camera-back none \
                   -camera-front none \
                   -wipe-data \
-                  -qemu -m 3072 \
                   > emulator.log 2>&1 &
               fi
               
