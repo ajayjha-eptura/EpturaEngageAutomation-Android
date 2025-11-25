@@ -70,7 +70,8 @@ RECORDING_PID=$!
 
 echo "✅ Screen recording started"
 echo "   PID: $RECORDING_PID"
-echo "   Output log: recording_output.log"
+echo "   Output: recording_output.log"
+echo "   ℹ️  Note: 'Time limit' warning from screenrecord is normal and can be ignored"
 
 # Give recording time to initialize
 sleep 3
@@ -78,6 +79,7 @@ sleep 3
 # Verify recording process is running
 if ! ps -p $RECORDING_PID > /dev/null 2>&1; then
     echo "⚠️  Warning: Recording process may have failed to start"
+    echo "🔍 Recording log output:"
     cat recording_output.log 2>/dev/null || true
 else
     echo "✅ Recording process confirmed running"
@@ -101,13 +103,25 @@ echo "   App:        $APP_NAME"
 echo "   Python:     $PYTHON_CMD"
 echo "   Recording:  ACTIVE ✅"
 echo ""
+echo "⏳ Starting Python installation script..."
+echo "   (Real-time output will appear below)"
+echo "────────────────────────────────────────────────────────────────────"
+echo ""
 
-# Run the installation
+# Run the installation with UNBUFFERED output (-u flag) for real-time logs
+# This ensures all print statements appear immediately in the pipeline logs
 INSTALL_START_TIME=$(date +%s)
-$PYTHON_CMD src/main/resources/install_from_playstore.py "$GOOGLE_EMAIL" "$GOOGLE_PASSWORD" "$APP_NAME"
+$PYTHON_CMD -u src/main/resources/install_from_playstore.py "$GOOGLE_EMAIL" "$GOOGLE_PASSWORD" "$APP_NAME"
 INSTALL_RESULT=$?
 INSTALL_END_TIME=$(date +%s)
 INSTALL_DURATION=$((INSTALL_END_TIME - INSTALL_START_TIME))
+
+echo ""
+echo "────────────────────────────────────────────────────────────────────"
+echo "✅ Python script execution completed"
+echo "   Exit code: $INSTALL_RESULT"
+echo "   Duration: ${INSTALL_DURATION}s"
+echo ""
 
 echo ""
 echo "════════════════════════════════════════════════════════════════════"
