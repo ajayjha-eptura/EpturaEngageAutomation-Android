@@ -308,21 +308,42 @@ class PlayStoreInstaller:
         if not self.wait_for_emulator_ready():
             print("⚠️  Proceeding anyway, but may encounter issues...")
         
+        # Check if Appium helper APKs are already installed (from warm-up script)
+        print("🔍 Checking for pre-installed Appium APKs...")
+        appium_apks_installed = self._check_appium_apks_installed()
+        
         options = UiAutomator2Options()
         options.platform_name = "Android"
         options.automation_name = "UiAutomator2"
         options.device_name = "Android Emulator"
         options.no_reset = True
         options.full_reset = False
-        # Timeouts optimized for macOS environment (typically faster than Windows)
+        # INCREASED timeouts for slow emulator APK installations (5+ minutes)
         options.new_command_timeout = 600
-        options.adb_exec_timeout = 100000
-        options.uiautomator2_server_launch_timeout = 60000
-        options.uiautomator2_server_install_timeout = 60000
+        options.adb_exec_timeout = 180000  # Increased from 100000 to 180000 (3 minutes)
+        options.uiautomator2_server_launch_timeout = 120000  # Increased from 60000 to 120000 (2 minutes)
+        options.uiautomator2_server_install_timeout = 180000  # Increased from 60000 to 180000 (3 minutes)
         
-        # Android 15 specific settings
-        options.skip_server_installation = False
-        options.skip_device_initialization = False
+        # If APKs are already installed, we can skip installation and device init
+        # This significantly speeds up driver initialization
+        if appium_apks_installed:
+            print("✅ Appium APKs already installed, skipping installation step")
+            options.skip_server_installation = True
+            options.skip_device_initialization = True
+        else:
+            print("⚠️  Appium APKs not pre-installed, will install during initialization")
+            options.skip_server_installation = False
+            options.skip_device_initialization = False
+        
+        # Ensure package manager is fully responsive before driver init
+        print("🔧 Pre-flight check: Testing package manager responsiveness...")
+        for attempt in range(3):
+            result = self._run_adb_command(['shell', 'pm', 'list', 'packages', '-s'], timeout=30)
+            if result and result.returncode == 0:
+                print(f"✅ Package manager responsive (attempt {attempt + 1})")
+                break
+            print(f"⚠️  Package manager slow, waiting... (attempt {attempt + 1}/3)")
+            time.sleep(10)
         
         # Add retry logic
         max_retries = 3
@@ -341,14 +362,70 @@ class PlayStoreInstaller:
                 return True
             except Exception as e:
                 retry_count += 1
-                print(f"⚠️  Attempt {retry_count}/{max_retries} failed: {e}")
+                error_msg = str(e)
+                print(f"⚠️  Attempt {retry_count}/{max_retries} failed: {error_msg}")
+                
+                # If it's a timeout issue, suggest increasing timeout
+                if 'timed out' in error_msg.lower() and 'install' in error_msg.lower():
+                    print("💡 APK installation timeout detected - emulator is too slow")
+                    print("   This usually resolves after emulator warms up")
+                    # If we thought APKs were installed but got timeout, disable skip on retry
+                    if appium_apks_installed and retry_count < max_retries:
+                        print("   Disabling skip_server_installation for next attempt...")
+                        options.skip_server_installation = False
+                        options.skip_device_initialization = False
+                
                 if retry_count < max_retries:
-                    wait_time = 15 * retry_count  # Standard backoff
+                    # Exponential backoff: 30, 60, 90 seconds
+                    wait_time = 30 * retry_count
                     print(f"⏳ Retrying in {wait_time} seconds...")
+                    
+                    # During wait, give emulator time to settle
+                    if retry_count == 1:
+                        print("   Allowing emulator to stabilize...")
+                        # Do a simple ADB command to keep things active
+                        self._run_adb_command(['shell', 'settings', 'get', 'global', 'animator_duration_scale'], timeout=10)
+                    
                     time.sleep(wait_time)
                 else:
                     print(f"❌ Failed to initialize Appium driver after {max_retries} attempts")
                     return False
+    
+    def _check_appium_apks_installed(self):
+        """Check if Appium UiAutomator2 APKs are already installed on the device"""
+        try:
+            # Check for the main packages that Appium needs
+            required_packages = [
+                'io.appium.uiautomator2.server',
+                'io.appium.uiautomator2.server.test',
+                'io.appium.settings'
+            ]
+            
+            result = self._run_adb_command(['shell', 'pm', 'list', 'packages'], timeout=20)
+            if not result or result.returncode != 0:
+                return False
+            
+            packages_output = result.stdout
+            installed_count = 0
+            
+            for package in required_packages:
+                if package in packages_output:
+                    installed_count += 1
+                    print(f"   ✅ Found: {package}")
+                else:
+                    print(f"   ❌ Missing: {package}")
+            
+            # All packages must be present
+            if installed_count == len(required_packages):
+                print(f"✅ All {len(required_packages)} Appium APKs are pre-installed")
+                return True
+            else:
+                print(f"⚠️  Only {installed_count}/{len(required_packages)} Appium APKs found")
+                return False
+                
+        except Exception as e:
+            print(f"⚠️  Error checking Appium APKs: {e}")
+            return False
     
     def wait_and_click(self, locator_type, locator_value, timeout=30):
         """Wait for element and click it"""

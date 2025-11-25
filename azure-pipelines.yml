@@ -387,6 +387,12 @@ stages:
             displayName: 'Start Appium Server'
 
           - bash: |
+              chmod +x scripts/emulator_warmup.sh
+              ./scripts/emulator_warmup.sh
+            displayName: 'Warm Up Emulator & Pre-install Appium APKs'
+            continueOnError: false
+
+          - bash: |
               echo "📲 Installing Eptura Engage App..."
               export ANDROID_HOME=$ANDROID_SDK_ROOT
               ADB="$ANDROID_HOME/platform-tools/adb"
