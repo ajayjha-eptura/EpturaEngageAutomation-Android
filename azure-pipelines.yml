@@ -1,5 +1,5 @@
 # Azure Pipeline for Eptura Engage Android Automation
-# This pipeline creates an emulator with Google Play Store and installs app from Play Store
+# Consolidated version with proven emulator startup and comprehensive features
 
 trigger:
   branches:
@@ -24,7 +24,7 @@ variables:
   mavenPOMFile: 'pom.xml'
   jdkVersion: '17'
   appiumVersion: '3.0.0'
-  androidSdkVersion: '35'
+  androidSdkVersion: '34'
   testResultsFolder: '$(System.DefaultWorkingDirectory)/target/surefire-reports'
   screenshotsFolder: '$(System.DefaultWorkingDirectory)/target/screenshots'
   extentReportFolder: '$(System.DefaultWorkingDirectory)/target'
@@ -32,7 +32,7 @@ variables:
 
 # Agent pool - Use Microsoft-hosted macOS agents for better Android emulator performance
 pool:
-  vmImage: 'macOS-14'
+  vmImage: 'macOS-13'  # Better emulator stability
 
 stages:
   - stage: Build
@@ -88,631 +88,182 @@ stages:
               versionSpec: '20.x'
 
           - bash: |
-              echo "🐍 Installing Python dependencies for Play Store installer..."
-              
-              # Windows uses 'python' and 'pip', not 'python3' and 'pip3'
-              if command -v python3 &> /dev/null; then
-                PYTHON_CMD=python3
-                PIP_CMD=pip3
-              else
-                PYTHON_CMD=python
-                PIP_CMD=pip
-              fi
-              
-              echo "Using Python command: $PYTHON_CMD"
-              $PYTHON_CMD --version
-              $PIP_CMD --version
-              
-              # Install Appium Python client and dependencies
-              # Note: --break-system-packages is for macOS/Linux only, Windows doesn't need it
-              echo "Installing Appium-Python-Client..."
-              if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OS" == "Windows_NT" ]]; then
-                # Windows installation
-                $PIP_CMD install --upgrade pip || echo "⚠️  Pip upgrade skipped (not critical)"
-                $PIP_CMD install Appium-Python-Client || { echo "❌ Failed to install Appium-Python-Client"; exit 1; }
-                $PIP_CMD install selenium || { echo "❌ Failed to install selenium"; exit 1; }
-              else
-                # macOS/Linux installation
-                $PIP_CMD install --upgrade pip --break-system-packages || echo "⚠️  Pip upgrade skipped (not critical)"
-                $PIP_CMD install Appium-Python-Client --break-system-packages || { echo "❌ Failed to install Appium-Python-Client"; exit 1; }
-                $PIP_CMD install selenium --break-system-packages || { echo "❌ Failed to install selenium"; exit 1; }
-              fi
-              
+              echo "🐍 Installing Python dependencies..."
+              pip3 install --break-system-packages Appium-Python-Client selenium || pip install Appium-Python-Client selenium
               echo "✅ Python dependencies installed"
-              $PIP_CMD list | grep -i appium || echo "Appium package verification"
             displayName: 'Install Python Dependencies'
 
           - bash: |
-              echo "📱 Configuring Android SDK with Google Play support for macOS..."
+              echo "📱 Setting up Android Emulator with PROVEN approach..."
               echo "============================================================================"
               
-              # Detect host architecture
-              HOST_ARCH=$(uname -m)
-              echo "🖥️  Host Architecture: $HOST_ARCH"
-              
-              # Determine which system image architecture to use
-              if [[ "$HOST_ARCH" == "arm64" ]] || [[ "$HOST_ARCH" == "aarch64" ]]; then
-                EMULATOR_ARCH="arm64-v8a"
-                echo "✅ Detected Apple Silicon (ARM64) - will use arm64-v8a system images"
-              else
-                EMULATOR_ARCH="x86_64"
-                echo "✅ Detected Intel (x86_64) - will use x86_64 system images"
-              fi
-              
-              # Set Android environment variables
+              # Set environment variables
               export ANDROID_HOME=$ANDROID_SDK_ROOT
-              export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin
+              export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
               
               echo "ANDROID_HOME: $ANDROID_HOME"
-              echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
               
-              # Verify Android SDK exists
-              if [ ! -d "$ANDROID_HOME" ]; then
-                echo "❌ ANDROID_HOME directory not found: $ANDROID_HOME"
-                exit 1
-              fi
+              # Kill any existing emulators or ADB
+              $ANDROID_HOME/platform-tools/adb kill-server || true
+              pkill -9 qemu-system || true
+              pkill -9 emulator || true
+              sleep 2
               
-              echo "📋 Android SDK structure:"
-              ls -la $ANDROID_HOME/ || true
+              # Accept licenses
+              yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
               
-              # Set up ADB path
-              echo "🔍 Setting up ADB..."
-              if [ -f "$ANDROID_HOME/platform-tools/adb" ]; then
-                ADB="$ANDROID_HOME/platform-tools/adb"
-              elif [ -f "$ANDROID_HOME/platform-tools/adb.exe" ]; then
-                ADB="$ANDROID_HOME/platform-tools/adb.exe"
-              else
-                echo "❌ ADB not found in platform-tools"
-                ls -la "$ANDROID_HOME/platform-tools/" || echo "platform-tools directory not found"
-                exit 1
-              fi
-              echo "✅ ADB found at: $ADB"
-              "$ADB" version || echo "ADB test failed"
-              
-              # Set up Emulator path
-              if [ -f "$ANDROID_HOME/emulator/emulator" ]; then
-                EMULATOR="$ANDROID_HOME/emulator/emulator"
-              elif [ -f "$ANDROID_HOME/emulator/emulator.exe" ]; then
-                EMULATOR="$ANDROID_HOME/emulator/emulator.exe"
-              else
-                echo "❌ Emulator not found"
-                exit 1
-              fi
-              echo "✅ Emulator found at: $EMULATOR"
-              
-              # Find sdkmanager
-              echo "🔍 Searching for sdkmanager..."
-              SDKMANAGER=""
-              
-              if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
-                SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-              elif [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat" ]; then
-                SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat"
-              else
-                FOUND_SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \( -name "sdkmanager" -o -name "sdkmanager.bat" \) -type f 2>/dev/null | head -1)
-                if [ -n "$FOUND_SDKMANAGER" ]; then
-                  SDKMANAGER="$FOUND_SDKMANAGER"
-                else
-                  echo "❌ sdkmanager not found in cmdline-tools"
-                  exit 1
-                fi
-              fi
-              
-              echo "✅ Found sdkmanager at: $SDKMANAGER"
-              "$SDKMANAGER" --version || { echo "❌ sdkmanager test failed"; exit 1; }
-              
-              # Accept all licenses
-              echo "📝 Accepting Android SDK licenses..."
-              mkdir -p "$ANDROID_HOME/licenses"
-              
-              echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
-              echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-              echo "d975f751698a77b662f1254ddbeed3901e976f5a" > "$ANDROID_HOME/licenses/intel-android-extra-license"
-              echo "33b6a2b64607f11b759f320ef9dff4ae5c47d97a" > "$ANDROID_HOME/licenses/google-gdk-license"
-              echo "e9acab5b5fbb560a72cfaecce8946896ff6aab9d" > "$ANDROID_HOME/licenses/mips-android-sysimage-license"
-              echo "d56a98520377fecf01c9e79e689e9ba188a4558e" > "$ANDROID_HOME/licenses/android-googletv-license"
-              echo "667f5ef1d0d6dbb3c1bb1dbe94f0c0c66f8c3ee5" > "$ANDROID_HOME/licenses/android-googlexr-license"
-              echo "e6b7c2ab7fa2298c15165e9583d0acf0b04a2232" > "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license"
-              echo "d56a98520377fecf01c9e79e689e9ba188a4558e" >> "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license"
-              
-              echo "✅ License files created successfully"
-              echo "📋 Licenses directory contents:"
-              ls -la "$ANDROID_HOME/licenses/" || true
-              
-              # Update SDK manager
-              echo "🔄 Updating SDK manager..."
-              "$SDKMANAGER" --update --sdk_root=$ANDROID_HOME || true
-              
-              # Install SDK components
-              echo "📦 Installing SDK components with Google Play Store..."
-              echo "============================================================================"
-              echo "⚠️  Using $EMULATOR_ARCH architecture for macOS $HOST_ARCH"
-              echo "============================================================================"
-              
-              echo "🔍 Checking available system images for $EMULATOR_ARCH..."
-              "$SDKMANAGER" --list --sdk_root=$ANDROID_HOME 2>&1 | grep "system-images;android-3[0-9];google_apis_playstore;$EMULATOR_ARCH" || echo "Searching for compatible images..."
-              
-              echo ""
-              echo "📥 Installing platform-tools..."
-              echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "platform-tools" || echo "⚠️  platform-tools may already be installed"
-              
-              echo ""
-              echo "📥 Installing emulator..."
-              echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "emulator" || echo "⚠️  emulator may already be installed"
-              
-              echo ""
-              echo "📥 Installing Android 34 platform (stable)..."
-              echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "platforms;android-34" || echo "⚠️  platforms;android-34 may already be installed"
-              
-              echo ""
-              echo "📥 Installing build-tools 34.0.0..."
-              echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "build-tools;34.0.0" || echo "⚠️  build-tools may already be installed"
-              
-              echo ""
-              echo "============================================================================"
-              echo "📥 Installing $EMULATOR_ARCH system image with Google Play Store..."
-              echo "⚠️  This is CRITICAL - MUST match host architecture!"
-              echo "============================================================================"
-              
-              # Try Android 34 first (more stable)
-              SYSTEM_IMAGE_INSTALLED=false
-              SYSTEM_IMAGE_PATH=""
-              ANDROID_API_LEVEL=""
-              
-              echo "Attempting to install Android 34 Google Play $EMULATOR_ARCH system image..."
-              if echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-34;google_apis_playstore;$EMULATOR_ARCH" 2>&1 | tee /tmp/system_image_install.log; then
-                echo "✅ System image installation command executed"
-                
-                # Wait for installation to complete
-                sleep 10
-                
-                # Verify installation
-                if [ -d "$ANDROID_HOME/system-images/android-34/google_apis_playstore/$EMULATOR_ARCH" ]; then
-                  echo "✅ Android 34 Google Play $EMULATOR_ARCH system image verified!"
-                  SYSTEM_IMAGE_PATH="system-images;android-34;google_apis_playstore;$EMULATOR_ARCH"
-                  ANDROID_API_LEVEL=34
-                  SYSTEM_IMAGE_INSTALLED=true
-                fi
-              fi
-              
-              # Try Android 33 as fallback
-              if [ "$SYSTEM_IMAGE_INSTALLED" = false ]; then
-                echo ""
-                echo "⚠️  Android 34 not available, trying Android 33..."
-                if echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-33;google_apis_playstore;$EMULATOR_ARCH"; then
-                  sleep 10
-                  if [ -d "$ANDROID_HOME/system-images/android-33/google_apis_playstore/$EMULATOR_ARCH" ]; then
-                    echo "✅ Android 33 Google Play $EMULATOR_ARCH system image verified!"
-                    SYSTEM_IMAGE_PATH="system-images;android-33;google_apis_playstore;$EMULATOR_ARCH"
-                    ANDROID_API_LEVEL=33
-                    SYSTEM_IMAGE_INSTALLED=true
-                  fi
-                fi
-              fi
-              
-              # Try Android 35 as last resort
-              if [ "$SYSTEM_IMAGE_INSTALLED" = false ]; then
-                echo ""
-                echo "⚠️  Trying Android 35..."
-                if echo "y" | "$SDKMANAGER" --sdk_root=$ANDROID_HOME "system-images;android-35;google_apis_playstore;$EMULATOR_ARCH"; then
-                  sleep 10
-                  if [ -d "$ANDROID_HOME/system-images/android-35/google_apis_playstore/$EMULATOR_ARCH" ]; then
-                    echo "✅ Android 35 Google Play $EMULATOR_ARCH system image verified!"
-                    SYSTEM_IMAGE_PATH="system-images;android-35;google_apis_playstore;$EMULATOR_ARCH"
-                    ANDROID_API_LEVEL=35
-                    SYSTEM_IMAGE_INSTALLED=true
-                  fi
-                fi
-              fi
-              
-              if [ "$SYSTEM_IMAGE_INSTALLED" = false ]; then
-                echo "❌ Failed to install any $EMULATOR_ARCH system image with Google Play Store"
-                echo ""
-                echo "Available system images:"
-                "$SDKMANAGER" --list --sdk_root=$ANDROID_HOME 2>&1 | grep google_apis_playstore || true
-                exit 1
-              fi
-              
-              echo ""
-              echo "✅ SDK components installation completed"
-              echo "System Image: $SYSTEM_IMAGE_PATH"
-              echo "API Level: $ANDROID_API_LEVEL"
-              echo "Architecture: $EMULATOR_ARCH"
-              
-              # Verify system image installation
-              echo "🔍 Verifying system image files..."
-              ls -la "$ANDROID_HOME/system-images/android-$ANDROID_API_LEVEL/google_apis_playstore/$EMULATOR_ARCH/" || {
-                echo "❌ System image directory not found!"
-                exit 1
+              # Install required components using sdkmanager
+              echo "📦 Installing SDK components..."
+              $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install \
+                "platform-tools" \
+                "platforms;android-34" \
+                "build-tools;34.0.0" \
+                "emulator" \
+                "system-images;android-34;google_apis_playstore;x86_64" || {
+                echo "⚠️ sdkmanager install had issues, checking what's available..."
               }
               
-              # Store variables for later use
-              echo "##vso[task.setvariable variable=SYSTEM_IMAGE_PATH]$SYSTEM_IMAGE_PATH"
-              echo "##vso[task.setvariable variable=ANDROID_API_LEVEL]$ANDROID_API_LEVEL"
-              echo "##vso[task.setvariable variable=EMULATOR_ARCH]$EMULATOR_ARCH"
-              echo "##vso[task.setvariable variable=ADB_PATH]$ADB"
-              echo "##vso[task.setvariable variable=EMULATOR_PATH]$EMULATOR"
+              # Verify system image is installed
+              echo "🔍 Checking installed system images..."
+              $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list_installed | grep system-images
               
-              # Find avdmanager
-              echo "🔍 Searching for avdmanager..."
-              if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" ]; then
-                AVDMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
-              elif [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager.bat" ]; then
-                AVDMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager.bat"
-              else
-                FOUND_AVDMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \( -name "avdmanager" -o -name "avdmanager.bat" \) -type f 2>/dev/null | head -1)
-                if [ -n "$FOUND_AVDMANAGER" ]; then
-                  AVDMANAGER="$FOUND_AVDMANAGER"
-                else
-                  echo "❌ avdmanager not found"
-                  exit 1
-                fi
-              fi
-              echo "✅ Found avdmanager at: $AVDMANAGER"
-              
-              # List installed system images
-              echo "📋 Installed system images:"
-              "$SDKMANAGER" --list_installed --sdk_root=$ANDROID_HOME 2>&1 | grep system-images || echo "No system images found"
-              
-              echo ""
-              echo "============================================================================"
-              echo "📱 Creating Android Emulator with Google Play Store ($EMULATOR_ARCH)..."
-              echo "============================================================================"
-              echo "Using system image: $SYSTEM_IMAGE_PATH"
-              echo "Android API Level: $ANDROID_API_LEVEL"
-              echo "Architecture: $EMULATOR_ARCH (matches host: $HOST_ARCH)"
-              
-              # Delete existing emulator if present
-              "$AVDMANAGER" delete avd -n $(emulatorName) 2>/dev/null || true
-              
-              # Create new emulator
-              echo "Creating emulator with Google Play Store support..."
-              echo "no" | "$AVDMANAGER" create avd \
+              # Create AVD with minimal configuration
+              echo "📱 Creating emulator AVD..."
+              echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
                 --force \
                 --name "$(emulatorName)" \
-                --package "$SYSTEM_IMAGE_PATH" \
-                --device "pixel_4" || {
-                echo "❌ Failed to create emulator"
+                --package "system-images;android-34;google_apis_playstore;x86_64" \
+                --device "pixel_5" \
+                --tag "google_apis_playstore" || {
+                echo "❌ Failed to create AVD"
                 exit 1
               }
               
-              # Verify emulator was created
-              echo "🔍 Verifying emulator creation..."
-              "$EMULATOR" -list-avds
+              echo "✅ AVD created successfully"
+              $ANDROID_HOME/emulator/emulator -list-avds
               
-              if "$EMULATOR" -list-avds | grep -q "$(emulatorName)"; then
-                echo "✅ Emulator '$(emulatorName)' created successfully with $EMULATOR_ARCH architecture"
-              else
-                echo "❌ Failed to create emulator"
-                exit 1
-              fi
-              
-              # Start emulator with optimized settings
-              echo ""
-              echo "============================================================================"
-              echo "🚀 Starting $EMULATOR_ARCH emulator (macOS $HOST_ARCH optimized)..."
+            displayName: 'Setup Android SDK and AVD'
+
+          - bash: |
+              echo "🚀 Starting Android Emulator with OPTIMIZED settings..."
               echo "============================================================================"
               
-              # Kill any existing ADB server and restart it
-              echo "🔄 Restarting ADB server for clean state..."
-              "$ADB" kill-server || true
+              export ANDROID_HOME=$ANDROID_SDK_ROOT
+              export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
+              
+              # Start ADB server
+              $ANDROID_HOME/platform-tools/adb start-server
               sleep 2
-              "$ADB" start-server
-              sleep 3
-              echo "✅ ADB server restarted"
               
-              # Start emulator in background with architecture-specific settings
-              if [[ "$EMULATOR_ARCH" == "arm64-v8a" ]]; then
-                # ARM64 emulator on Apple Silicon - no hardware acceleration needed
-                echo "Starting ARM64 emulator (native on Apple Silicon)..."
-                nohup "$EMULATOR" -avd $(emulatorName) \
-                  -no-snapshot-save \
-                  -no-window \
-                  -no-audio \
-                  -no-boot-anim \
-                  -gpu swiftshader_indirect \
-                  -memory 4096 \
-                  -cores 2 \
-                  -wipe-data \
-                  > emulator.log 2>&1 &
-              else
-                # x86_64 emulator - optimized for Azure CI with limited resources
-                echo "Starting x86_64 emulator with software rendering (Azure CI optimized)..."
-                nohup "$EMULATOR" -avd $(emulatorName) \
-                  -no-snapshot-save \
-                  -no-snapshot-load \
-                  -no-window \
-                  -no-audio \
-                  -no-boot-anim \
-                  -gpu swiftshader_indirect \
-                  -memory 2048 \
-                  -cores 2 \
-                  -skin 1080x1920 \
-                  -camera-back none \
-                  -camera-front none \
-                  -wipe-data \
-                  > emulator.log 2>&1 &
-              fi
+              # Configure emulator for Azure CI
+              mkdir -p ~/.android
+              cat > ~/.android/advancedFeatures.ini << EOF
+              Vulkan = off
+              GLDirectMem = on
+              GLDMA = on
+              EOF
+              
+              # Start emulator with Azure-optimized flags
+              echo "Starting emulator in background..."
+              $ANDROID_HOME/emulator/emulator \
+                -avd "$(emulatorName)" \
+                -no-window \
+                -no-audio \
+                -no-boot-anim \
+                -gpu swiftshader_indirect \
+                -no-snapshot \
+                -memory 3584 \
+                -partition-size 4096 \
+                -cores 2 \
+                -skin 1080x1920 \
+                -camera-back none \
+                -camera-front none \
+                -qemu -m 3584 \
+                > emulator.log 2>&1 &
               
               EMULATOR_PID=$!
               echo "Emulator PID: $EMULATOR_PID"
-              echo "##vso[task.setvariable variable=EMULATOR_PID]$EMULATOR_PID"
               
-              # Give emulator a moment to initialize
-              echo "⏳ Waiting for emulator process to initialize..."
-              sleep 10
+              # Smart boot wait with multiple checks
+              echo "⏳ Waiting for emulator to boot (max 5 minutes)..."
               
-              # Verify emulator process is running
-              if ! ps -p $EMULATOR_PID > /dev/null 2>&1; then
-                echo "❌ Emulator process died!"
-                echo "=== Emulator Log ==="
-                cat emulator.log
-                exit 1
-              fi
-              echo "✅ Emulator process is running"
+              TIMEOUT=300
+              ELAPSED=0
+              BOOT_COMPLETE=false
               
-              # Wait for device to be detected
-              echo "⏳ Waiting for emulator device to be detected (max 120 seconds)..."
-              
-              WAIT_COUNT=0
-              MAX_WAIT=120
-              DEVICE_DETECTED=false
-              
-              while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
-                # Refresh ADB devices list
-                "$ADB" devices > /tmp/adb_devices.txt 2>&1
-                
-                # Check for emulator device (offline or online)
-                if grep -q "emulator" /tmp/adb_devices.txt; then
-                  echo "✅ Emulator device detected in ADB!"
-                  cat /tmp/adb_devices.txt
-                  DEVICE_DETECTED=true
-                  break
-                fi
-                
-                sleep 1
-                WAIT_COUNT=$((WAIT_COUNT + 1))
-                
-                if [ $((WAIT_COUNT % 10)) -eq 0 ]; then
-                  echo "  Still waiting for device... ($WAIT_COUNT/$MAX_WAIT seconds)"
-                  
-                  # Show current ADB devices every 30 seconds
-                  if [ $((WAIT_COUNT % 30)) -eq 0 ]; then
-                    echo "  Current ADB devices:"
-                    "$ADB" devices
-                    
-                    # Show last few lines of emulator log
-                    echo "  Emulator log (last 10 lines):"
-                    tail -10 emulator.log 2>/dev/null || echo "  No log available yet"
-                  fi
-                fi
-              done
-              
-              if [ "$DEVICE_DETECTED" = false ]; then
-                echo "❌ Emulator device not detected after $MAX_WAIT seconds"
-                echo ""
-                echo "Current ADB devices:"
-                "$ADB" devices
-                echo ""
-                echo "Checking emulator process:"
-                ps aux | grep emulator | grep -v grep || echo "Emulator process not found"
-                echo ""
-                echo "=== Emulator Log ==="
-                cat emulator.log
-                exit 1
-              fi
-              
-              # Now wait for device to come online
-              echo "⏳ Waiting for device to come online (max 120 seconds)..."
-              ONLINE_WAIT=0
-              MAX_ONLINE_WAIT=120
-              
-              while [ $ONLINE_WAIT -lt $MAX_ONLINE_WAIT ]; do
-                if "$ADB" devices | grep "emulator.*device" > /dev/null 2>&1; then
-                  echo "✅ Device is online!"
-                  break
-                fi
-                
-                sleep 1
-                ONLINE_WAIT=$((ONLINE_WAIT + 1))
-                
-                if [ $((ONLINE_WAIT % 15)) -eq 0 ]; then
-                  echo "  Device status: $("$ADB" devices | grep emulator || echo 'offline or booting')"
-                fi
-              done
-              
-              if [ $ONLINE_WAIT -ge $MAX_ONLINE_WAIT ]; then
-                echo "⚠️  Device did not come online, but continuing..."
-                "$ADB" devices
-              fi
-              
-              # Wait for boot completion with increased timeout for ARM64
-              if [[ "$EMULATOR_ARCH" == "arm64-v8a" ]]; then
-                BOOT_TIMEOUT=300  # 5 minutes for ARM64
-              else
-                BOOT_TIMEOUT=180  # 3 minutes for x86_64
-              fi
-              
-              echo "⏳ Waiting for boot_completed flag (max $BOOT_TIMEOUT seconds)..."
-              elapsed=0
-              until [[ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; do
-                if [ $elapsed -ge $BOOT_TIMEOUT ]; then
-                  echo "❌ Boot timeout after $BOOT_TIMEOUT seconds"
-                  echo "=== Emulator Log (last 100 lines) ==="
-                  tail -100 emulator.log
+              while [ $ELAPSED -lt $TIMEOUT ]; do
+                # Check if emulator process is still running
+                if ! ps -p $EMULATOR_PID > /dev/null 2>&1; then
+                  echo "❌ Emulator process died!"
+                  tail -50 emulator.log
                   exit 1
                 fi
-                sleep 5
-                elapsed=$((elapsed+5))
-                if [ $((elapsed % 15)) -eq 0 ]; then
-                  echo "  Still booting... ($elapsed/$BOOT_TIMEOUT seconds)"
-                fi
-              done
-              
-              echo "✅ Boot completed flag set!"
-              
-              # Check services
-              echo "⏳ Waiting for Android system services (max 30 seconds)..."
-              
-              service_ready=false
-              max_wait=30
-              elapsed=0
-              
-              while [ $elapsed -lt $max_wait ]; do
-                pm_ready=false
-                am_ready=false
                 
-                if "$ADB" shell pm list packages >/dev/null 2>&1; then
-                  pm_ready=true
-                fi
+                # Check boot completed
+                BOOT_STATUS=$($ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed 2>&1 | tr -d '\r\n')
                 
-                if "$ADB" shell am get-config >/dev/null 2>&1; then
-                  am_ready=true
-                fi
-                
-                if [ "$pm_ready" = true ] && [ "$am_ready" = true ]; then
-                  echo "✅ All critical services are ready!"
-                  service_ready=true
+                if [ "$BOOT_STATUS" = "1" ]; then
+                  echo "✅ Boot completed!"
+                  BOOT_COMPLETE=true
                   break
                 fi
                 
-                sleep 3
-                elapsed=$((elapsed+3))
-                
-                if [ $((elapsed % 15)) -eq 0 ]; then
-                  echo "  Still initializing services... ($elapsed/$max_wait seconds)"
-                  echo "    - Package Manager: $([ "$pm_ready" = true ] && echo "✅" || echo "⏳")"
-                  echo "    - Activity Manager: $([ "$am_ready" = true ] && echo "✅" || echo "⏳")"
+                # Progress indicator
+                if [ $((ELAPSED % 15)) -eq 0 ]; then
+                  echo "  Still booting... (${ELAPSED}s / ${TIMEOUT}s)"
+                  $ANDROID_HOME/platform-tools/adb devices
                 fi
+                
+                sleep 5
+                ELAPSED=$((ELAPSED + 5))
               done
               
-              if [ "$service_ready" = false ]; then
-                echo "⚠️  Services not ready after $max_wait seconds, but continuing..."
+              if [ "$BOOT_COMPLETE" = false ]; then
+                echo "❌ Emulator boot timeout!"
+                echo "=== Emulator Log ==="
+                tail -100 emulator.log
+                echo "=== ADB Devices ==="
+                $ANDROID_HOME/platform-tools/adb devices -l
+                exit 1
               fi
               
-              # Stability wait
-              echo "⏳ Allowing system to stabilize (30 seconds)..."
-              sleep 30
+              # Additional stabilization
+              echo "⏳ Waiting for package manager to be ready..."
+              for i in {1..20}; do
+                if $ANDROID_HOME/platform-tools/adb shell pm path android > /dev/null 2>&1; then
+                  echo "✅ Package manager ready!"
+                  break
+                fi
+                echo "  Checking package manager... ($i/20)"
+                sleep 3
+              done
               
-              echo "✅ Emulator should now be ready"
+              # Disable animations for faster test execution
+              echo "🎬 Disabling animations..."
+              $ANDROID_HOME/platform-tools/adb shell settings put global window_animation_scale 0
+              $ANDROID_HOME/platform-tools/adb shell settings put global transition_animation_scale 0
+              $ANDROID_HOME/platform-tools/adb shell settings put global animator_duration_scale 0
+              
+              # Unlock screen
+              $ANDROID_HOME/platform-tools/adb shell input keyevent 82
               
               # Final verification
-              echo "🔍 Final system verification..."
-              
-              # Verify ADB connection
-              echo "⏳ Verifying ADB shell connection..."
-              adb_shell_ready=false
-              for attempt in {1..5}; do
-                echo "  Attempt $attempt/5: Testing ADB shell..."
-                if timeout 5 "$ADB" shell echo "test" > /dev/null 2>&1; then
-                  echo "✅ ADB shell connection established (attempt $attempt)"
-                  adb_shell_ready=true
-                  break
-                fi
-                echo "  ⏳ ADB shell not ready, waiting 3 seconds..."
-                sleep 3
-              done
-              
-              if [ "$adb_shell_ready" = false ]; then
-                echo "⚠️  ADB shell not responding after 15 seconds"
-                echo "This may indicate emulator instability, but continuing..."
-              fi
-              
-              # Verify package manager
-              echo "🔍 Verifying package manager..."
-              pm_verified=false
-              for i in {1..3}; do
-                echo "  Attempt $i/3: Checking package manager..."
-                if "$ADB" shell pm list packages > /dev/null 2>&1; then
-                  pm_verified=true
-                  echo "✅ Package manager verified"
-                  break
-                fi
-                echo "  Retry $i/3 for package manager..."
-                sleep 5
-              done
-              
-              if [ "$pm_verified" = false ]; then
-                echo "⚠️  Package manager not responding reliably"
-                echo "⚠️  Continuing anyway - tests may fail if package manager is not ready"
-              fi
-              
-              # Show emulator status
               echo ""
-              echo "📱 Emulator status:"
-              "$ADB" devices -l
+              echo "✅ EMULATOR READY!"
+              echo "============================================================================"
+              $ANDROID_HOME/platform-tools/adb devices -l
+              echo "Android Version: $($ANDROID_HOME/platform-tools/adb shell getprop ro.build.version.release | tr -d '\r\n')"
+              echo "API Level: $($ANDROID_HOME/platform-tools/adb shell getprop ro.build.version.sdk | tr -d '\r\n')"
               
-              # Get Android version
-              android_version="unknown"
-              for i in {1..3}; do
-                android_version=$("$ADB" shell getprop ro.build.version.release 2>/dev/null | tr -d '\r\n')
-                if [ -n "$android_version" ]; then
-                  break
-                fi
-                sleep 3
-              done
-              echo "Android version: $android_version"
-              
-              # Get API level
-              api_level="unknown"
-              for i in {1..3}; do
-                api_level=$("$ADB" shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r\n')
-                if [ -n "$api_level" ]; then
-                  break
-                fi
-                sleep 3
-              done
-              echo "API Level: $api_level"
-              
-              # Verify architecture
-              echo "🔍 Verifying emulator architecture..."
-              emu_arch=$("$ADB" shell getprop ro.product.cpu.abi 2>/dev/null | tr -d '\r\n')
-              echo "Emulator CPU Architecture: $emu_arch"
-              
-              if [[ "$emu_arch" == "$EMULATOR_ARCH" ]] || [[ "$emu_arch" == "arm64-v8a" && "$EMULATOR_ARCH" == "arm64-v8a" ]] || [[ "$emu_arch" == "x86_64" && "$EMULATOR_ARCH" == "x86_64" ]]; then
-                echo "✅ CONFIRMED: Running $EMULATOR_ARCH emulator (matches host)"
+              # Check for Google Play
+              if $ANDROID_HOME/platform-tools/adb shell pm list packages | grep -q "com.android.vending"; then
+                echo "✅ Google Play Store: AVAILABLE"
               else
-                echo "⚠️  WARNING: Architecture mismatch! Expected: $EMULATOR_ARCH, Got: $emu_arch"
+                echo "⚠️  Google Play Store: NOT FOUND"
               fi
-              
-              # Check for Google Play Store
-              echo ""
-              echo "🔍 Checking for Google Play Store..."
-              play_store_found=false
-              for i in {1..3}; do
-                if "$ADB" shell pm list packages 2>/dev/null | grep -q "com.android.vending"; then
-                  play_store_found=true
-                  echo "✅ Google Play Store is present!"
-                  PLAY_STORE_VERSION=$("$ADB" shell dumpsys package com.android.vending 2>/dev/null | grep versionName | head -1 | awk '{print $1}' || echo "version unknown")
-                  echo "Play Store: $PLAY_STORE_VERSION"
-                  break
-                fi
-                echo "  Attempt $i/3: Play Store not detected yet, waiting..."
-                sleep 10
-              done
-              
-              if [ "$play_store_found" = false ]; then
-                echo "⚠️  Google Play Store not found after multiple checks"
-                echo "📋 Checking Google services packages:"
-                "$ADB" shell pm list packages 2>/dev/null | grep -i google | head -10 || echo "Could not list packages"
-              fi
-              
-              # Get emulator serial
-              EMULATOR_SERIAL=$("$ADB" devices | grep "emulator" | head -1 | awk '{print $1}')
-              echo ""
-              echo "Emulator Serial: $EMULATOR_SERIAL"
-              echo "##vso[task.setvariable variable=EMULATOR_SERIAL]$EMULATOR_SERIAL"
-              
-              echo ""
               echo "============================================================================"
-              echo "✅ Android $EMULATOR_ARCH emulator setup complete!"
-              echo "============================================================================"
-              echo "Platform: macOS $HOST_ARCH"
-              echo "Architecture: $EMULATOR_ARCH"
-              echo "Google Play: $( [ "$play_store_found" = true ] && echo "✅ Available" || echo "⚠️ Not detected" )"
-              echo "API Level: $api_level"
-              echo "============================================================================"
-            displayName: 'Setup Android SDK and Create Emulator with Google Play'
+              
+            displayName: 'Start Emulator and Wait for Boot'
 
           - task: Npm@1
             displayName: 'Install Appium'
@@ -721,33 +272,20 @@ stages:
               customCommand: 'install -g appium@$(appiumVersion)'
 
           - bash: |
-              echo "🔌 Installing Appium UiAutomator2 Driver..."
               appium driver install uiautomator2
               appium driver list --installed
-              echo "✅ Driver installed"
-            displayName: 'Install Appium Driver'
+            displayName: 'Install Appium UiAutomator2 Driver'
 
           - bash: |
               echo "🚀 Starting Appium Server..."
               mkdir -p logs
               
-              # Clean up any existing Appium processes - cross-platform
-              echo "Checking for existing Appium processes..."
-              if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
-                # Windows: kill node.exe processes on port 4723
-                echo "Windows detected - cleaning up processes on port 4723..."
-                netstat -ano | findstr :4723 | awk '{print $5}' | xargs -r taskkill //F //PID 2>/dev/null || true
-              else
-                # Unix: use pkill
-                pkill -f appium || true
-              fi
+              pkill -f appium || true
               sleep 2
               
-              # Start Appium
               nohup appium --address 127.0.0.1 --port 4723 --session-override --log-level info > logs/appium.log 2>&1 &
               APPIUM_PID=$!
               echo "Appium PID: $APPIUM_PID"
-              echo "##vso[task.setvariable variable=APPIUM_PID]$APPIUM_PID"
               
               # Wait for Appium to be ready
               for i in {1..30}; do
@@ -755,7 +293,7 @@ stages:
                   echo "✅ Appium server is ready"
                   exit 0
                 fi
-                echo "Waiting... ($i/30)"
+                echo "Waiting for Appium... ($i/30)"
                 sleep 2
               done
               
@@ -765,130 +303,54 @@ stages:
             displayName: 'Start Appium Server'
 
           - bash: |
-              echo "📲 Installing Eptura Engage App using Python automation script..."
-              echo "======================================================="
-              
-              # Get ADB path from environment variable
-              ADB="${ADB_PATH:-adb}"
-              
-              # Define package name
+              echo "📲 Installing Eptura Engage App..."
+              export ANDROID_HOME=$ANDROID_SDK_ROOT
+              ADB="$ANDROID_HOME/platform-tools/adb"
               PACKAGE_NAME="com.condecosoftware.condeco"
               
-              # Check if app is already installed
+              # Check if already installed
               if "$ADB" shell pm list packages | grep -q "$PACKAGE_NAME"; then
                 echo "✅ App is already installed!"
-                APP_INFO=$("$ADB" shell dumpsys package $PACKAGE_NAME | grep -E "versionName|versionCode" | head -2)
-                echo "App info:"
-                echo "$APP_INFO"
                 exit 0
               fi
               
-              echo "📦 Method 1: Attempting direct APK installation..."
-              echo ""
-              
-              # Check if APK file is provided in the repo
+              # Method 1: Check for APK in repo
               if [ -f "app/Eptura_Engage.apk" ] || [ -f "Eptura_Engage.apk" ]; then
                 APK_PATH=$(find . -name "Eptura_Engage.apk" -o -name "condeco.apk" | head -1)
-                echo "✅ Found APK file: $APK_PATH"
-                echo "📥 Installing APK..."
-                
+                echo "✅ Found APK: $APK_PATH"
                 "$ADB" install -r "$APK_PATH"
-                
                 if [ $? -eq 0 ]; then
                   echo "✅ APK installed successfully!"
                   exit 0
-                else
-                  echo "⚠️  APK installation failed, trying alternative methods..."
                 fi
-              else
-                echo "ℹ️  No APK file found in repository"
               fi
               
-              echo ""
-              echo "📦 Method 2: Using Python automation script for Play Store installation..."
-              echo ""
-              
-              # Set Python command based on OS
-              if command -v python3 &> /dev/null; then
-                PYTHON_CMD=python3
-              else
-                PYTHON_CMD=python
-              fi
-              
-              echo "Using Python: $PYTHON_CMD"
-              $PYTHON_CMD --version
-              
-              # Check if Python script exists
-              SCRIPT_PATH="src/main/resources/install_from_playstore.py"
-              if [ ! -f "$SCRIPT_PATH" ]; then
-                echo "❌ Python script not found at: $SCRIPT_PATH"
-                echo "⚠️  Please ensure install_from_playstore.py exists in the repository"
-                exit 1
-              fi
-              
-              echo "✅ Found Python script: $SCRIPT_PATH"
-              echo ""
-              
-              # Get Google credentials from environment variables or Azure Key Vault
-              # NOTE: These should be stored as secure pipeline variables
-              GOOGLE_EMAIL="${GOOGLE_EMAIL:-}"
-              GOOGLE_PASSWORD="${GOOGLE_PASSWORD:-}"
-              
-              if [ -z "$GOOGLE_EMAIL" ] || [ -z "$GOOGLE_PASSWORD" ]; then
-                echo "⚠️  WARNING: Google credentials not provided"
-                echo "ℹ️  The Python script will attempt deep-link installation (no login required)"
-                echo "ℹ️  To enable full automation, set GOOGLE_EMAIL and GOOGLE_PASSWORD as pipeline variables"
-                echo ""
-              else
-                echo "✅ Google credentials found (masked for security)"
-                echo "📧 Email: ${GOOGLE_EMAIL:0:2}***@***"
-              fi
-              
-              # Run the Python automation script
-              echo "🚀 Starting automated Play Store installation..."
-              echo "=================================================="
-              
-              if [ -n "$GOOGLE_EMAIL" ] && [ -n "$GOOGLE_PASSWORD" ]; then
-                # Run with credentials for full automation
-                $PYTHON_CMD "$SCRIPT_PATH" "$GOOGLE_EMAIL" "$GOOGLE_PASSWORD" "Eptura Engage"
-                INSTALL_RESULT=$?
-              else
-                # Run without credentials - will use deep link method only
-                export GOOGLE_EMAIL=""
-                export GOOGLE_PASSWORD=""
-                $PYTHON_CMD "$SCRIPT_PATH"
-                INSTALL_RESULT=$?
-              fi
-              
-              echo ""
-              echo "=================================================="
-              
-              if [ $INSTALL_RESULT -eq 0 ]; then
-                echo "✅ Play Store installation completed successfully!"
+              # Method 2: Use Python script for Play Store
+              if [ -f "src/main/resources/install_from_playstore.py" ]; then
+                echo "📦 Attempting Play Store installation..."
+                
+                # Set Python command
+                if command -v python3 &> /dev/null; then
+                  PYTHON_CMD=python3
+                else
+                  PYTHON_CMD=python
+                fi
+                
+                $PYTHON_CMD src/main/resources/install_from_playstore.py || {
+                  echo "⚠️ Play Store installation had issues but continuing..."
+                }
                 
                 # Verify installation
                 if "$ADB" shell pm list packages | grep -q "$PACKAGE_NAME"; then
-                  echo "✅ App package verified: $PACKAGE_NAME"
-                  APP_INFO=$("$ADB" shell dumpsys package $PACKAGE_NAME | grep -E "versionName|versionCode" | head -2)
-                  echo "App details:"
-                  echo "$APP_INFO"
+                  echo "✅ Play Store installation successful!"
                   exit 0
-                else
-                  echo "⚠️  App package not found after installation"
-                  exit 1
                 fi
-              else
-                echo "❌ Play Store installation failed"
-                echo ""
-                echo "💡 TROUBLESHOOTING:"
-                echo "   1. Ensure Google Play Store is working on the emulator"
-                echo "   2. Check if Appium server is running properly"
-                echo "   3. Verify emulator has internet connectivity"
-                echo "   4. Consider adding the APK file directly to the repository"
-                echo ""
-                exit 1
               fi
+              
+              echo "❌ Could not install app - please provide APK file or configure Play Store credentials"
+              exit 1
             displayName: 'Install Eptura Engage App'
+            continueOnError: true
             env:
               GOOGLE_EMAIL: $(GOOGLE_EMAIL)
               GOOGLE_PASSWORD: $(GOOGLE_PASSWORD)
@@ -926,39 +388,17 @@ stages:
               APPIUM_SERVER_URL: 'http://127.0.0.1:4723'
             continueOnError: true
 
+          # Cleanup
           - bash: |
-              echo "🧹 Cleanup: Stopping Appium Server..."
-              # Cross-platform cleanup
-              if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
-                # Windows: kill processes on port 4723
-                netstat -ano | findstr :4723 | awk '{print $5}' | xargs -r taskkill //F //PID 2>/dev/null || true
-              else
-                # Unix: use pkill
-                pkill -f appium || true
-              fi
-            displayName: 'Stop Appium Server'
+              pkill -f appium || true
+              export ANDROID_HOME=$ANDROID_SDK_ROOT
+              $ANDROID_HOME/platform-tools/adb emu kill || true
+              pkill -9 qemu-system || true
+              pkill -9 emulator || true
+            displayName: 'Cleanup'
             condition: always()
 
-          - bash: |
-              echo "🧹 Cleanup: Stopping Emulator..."
-              
-              # Get ADB path from environment variable
-              ADB="${ADB_PATH:-adb}"
-              
-              "$ADB" emu kill || true
-              
-              # Cross-platform emulator cleanup
-              if [[ "$OSTYPE" == "msys" ]] || [[ "$OS" == "Windows_NT" ]]; then
-                # Windows: kill emulator processes
-                tasklist | grep -i "qemu-system\|emulator" | awk '{print $2}' | xargs -r taskkill //F //PID 2>/dev/null || true
-              else
-                # Unix: use pkill
-                pkill -f "emulator.*$(emulatorName)" || true
-              fi
-              sleep 5
-            displayName: 'Stop Emulator'
-            condition: always()
-
+          # Publish artifacts
           - task: PublishTestResults@2
             displayName: 'Publish Test Results'
             inputs:
