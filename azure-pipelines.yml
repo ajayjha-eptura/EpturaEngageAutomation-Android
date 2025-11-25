@@ -28,7 +28,7 @@ variables:
   testResultsFolder: '$(System.DefaultWorkingDirectory)/target/surefire-reports'
   screenshotsFolder: '$(System.DefaultWorkingDirectory)/target/screenshots'
   extentReportFolder: '$(System.DefaultWorkingDirectory)/target'
-  emulatorName: 'test_emulator_playstore'
+  emulatorName: 'test_emulator'
 
 # Agent pool - Use Microsoft-hosted macOS agents for better Android emulator performance
 pool:
@@ -163,11 +163,16 @@ stages:
             displayName: 'Setup Android SDK and AVD'
 
           - bash: |
-              echo "🚀 Starting Android Emulator with MAXIMUM COMPATIBILITY..."
+              echo "🚀 Starting Android Emulator with IMPROVED ADB HANDLING..."
               echo "============================================================================"
               
               export ANDROID_HOME=$ANDROID_SDK_ROOT
               export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
+              
+              # Kill and restart ADB to ensure clean state
+              echo "Preparing ADB..."
+              $ANDROID_HOME/platform-tools/adb kill-server || true
+              sleep 2
               
               # Configure advanced features for hardware acceleration
               mkdir -p ~/.android
@@ -180,13 +185,8 @@ stages:
               KVM = off
               EOF
               
-              # Start ADB server
-              echo "Starting ADB server..."
-              $ANDROID_HOME/platform-tools/adb start-server
-              sleep 3
-              
               # Start emulator with optimized flags for macOS CI
-              echo "Starting emulator with compatibility mode..."
+              echo "Starting emulator in background..."
               $ANDROID_HOME/emulator/emulator \
                 -avd ci_emulator \
                 -no-window \
@@ -208,10 +208,24 @@ stages:
               EMULATOR_PID=$!
               echo "Emulator PID: $EMULATOR_PID"
               
-              # Enhanced boot wait logic
-              echo "⏳ Waiting for emulator to boot (max 8 minutes with health checks)..."
+              # Wait for emulator to appear in process list
+              echo "⏳ Waiting for emulator process to stabilize..."
+              sleep 15
               
-              TIMEOUT=480
+              # Now start ADB server (after emulator is running)
+              echo "Starting ADB server..."
+              $ANDROID_HOME/platform-tools/adb start-server
+              sleep 5
+              
+              # Force ADB to reconnect
+              echo "Connecting ADB to emulator..."
+              $ANDROID_HOME/platform-tools/adb devices
+              sleep 3
+              
+              # Enhanced boot wait logic with better timeout
+              echo "⏳ Waiting for emulator to boot (max 10 minutes)..."
+              
+              TIMEOUT=600
               ELAPSED=0
               BOOT_COMPLETE=false
               DEVICE_ONLINE=false
@@ -225,8 +239,20 @@ stages:
                   exit 1
                 fi
                 
-                # Wait for device to appear
+                # Get device state
                 DEVICE_STATE=$($ANDROID_HOME/platform-tools/adb devices | grep emulator | awk '{print $2}')
+                
+                # If no device found, try to restart ADB connection
+                if [ -z "$DEVICE_STATE" ] && [ $ELAPSED -gt 30 ]; then
+                  if [ $((ELAPSED % 60)) -eq 0 ]; then
+                    echo "⚠️  No device found, restarting ADB server..."
+                    $ANDROID_HOME/platform-tools/adb kill-server
+                    sleep 2
+                    $ANDROID_HOME/platform-tools/adb start-server
+                    sleep 3
+                    $ANDROID_HOME/platform-tools/adb devices
+                  fi
+                fi
                 
                 if [ "$DEVICE_STATE" = "device" ]; then
                   if [ "$DEVICE_ONLINE" = false ]; then
@@ -235,22 +261,26 @@ stages:
                   fi
                   
                   # Check boot completion
-                  BOOT_STATUS=$($ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed 2>&1 | tr -d '\r\n')
+                  BOOT_STATUS=$($ANDROID_HOME/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed 2>&1 | tr -d '\r\n')
                   
                   if [ "$BOOT_STATUS" = "1" ]; then
                     echo "✅ Boot completed successfully!"
                     BOOT_COMPLETE=true
                     break
                   fi
-                elif [ "$DEVICE_STATE" = "offline" ] && [ $ELAPSED -gt 120 ]; then
-                  # If stuck offline for more than 2 minutes, try to recover
-                  echo "⚠️  Device stuck offline, attempting recovery..."
-                  $ANDROID_HOME/platform-tools/adb reconnect
-                  sleep 5
+                elif [ "$DEVICE_STATE" = "offline" ]; then
+                  if [ $ELAPSED -gt 60 ] && [ $((ELAPSED % 30)) -eq 0 ]; then
+                    # Try to recover from offline state
+                    echo "⚠️  Device stuck offline, attempting recovery..."
+                    $ANDROID_HOME/platform-tools/adb kill-server
+                    sleep 2
+                    $ANDROID_HOME/platform-tools/adb start-server
+                    sleep 3
+                  fi
                 fi
                 
-                # Progress updates
-                if [ $((ELAPSED % 20)) -eq 0 ]; then
+                # Progress updates every 15 seconds
+                if [ $((ELAPSED % 15)) -eq 0 ]; then
                   echo "  Status: $DEVICE_STATE | Time: ${ELAPSED}s / ${TIMEOUT}s"
                   $ANDROID_HOME/platform-tools/adb devices
                 fi
@@ -260,7 +290,7 @@ stages:
               done
               
               if [ "$BOOT_COMPLETE" = false ]; then
-                echo "❌ Emulator failed to boot properly!"
+                echo "❌ Emulator failed to boot properly within timeout!"
                 echo ""
                 echo "=== Final Device Status ==="
                 $ANDROID_HOME/platform-tools/adb devices -l
@@ -268,8 +298,8 @@ stages:
                 echo "=== Emulator Log (last 200 lines) ==="
                 tail -200 emulator.log
                 echo ""
-                echo "=== ADB Logcat Sample ==="
-                timeout 5 $ANDROID_HOME/platform-tools/adb logcat -d | tail -50 || true
+                echo "=== Checking if emulator is actually running ==="
+                ps aux | grep emulator | grep -v grep || true
                 exit 1
               fi
               
@@ -278,8 +308,9 @@ stages:
               sleep 10
               
               # Wait for package manager
+              echo "⏳ Waiting for package manager..."
               for i in {1..30}; do
-                if $ANDROID_HOME/platform-tools/adb shell pm path android > /dev/null 2>&1; then
+                if $ANDROID_HOME/platform-tools/adb -s emulator-5554 shell pm path android > /dev/null 2>&1; then
                   echo "✅ Package manager ready!"
                   break
                 fi
@@ -292,7 +323,7 @@ stages:
               # Wait for launcher
               echo "⏳ Waiting for launcher..."
               for i in {1..20}; do
-                if $ANDROID_HOME/platform-tools/adb shell dumpsys window | grep -q "mCurrentFocus"; then
+                if $ANDROID_HOME/platform-tools/adb -s emulator-5554 shell dumpsys window 2>/dev/null | grep -q "mCurrentFocus"; then
                   echo "✅ Launcher is ready!"
                   break
                 fi
@@ -301,22 +332,22 @@ stages:
               
               # Performance optimizations
               echo "🎬 Applying optimizations..."
-              $ANDROID_HOME/platform-tools/adb shell settings put global window_animation_scale 0 || true
-              $ANDROID_HOME/platform-tools/adb shell settings put global transition_animation_scale 0 || true
-              $ANDROID_HOME/platform-tools/adb shell settings put global animator_duration_scale 0 || true
-              $ANDROID_HOME/platform-tools/adb shell input keyevent 82 || true
+              $ANDROID_HOME/platform-tools/adb -s emulator-5554 shell settings put global window_animation_scale 0 2>/dev/null || true
+              $ANDROID_HOME/platform-tools/adb -s emulator-5554 shell settings put global transition_animation_scale 0 2>/dev/null || true
+              $ANDROID_HOME/platform-tools/adb -s emulator-5554 shell settings put global animator_duration_scale 0 2>/dev/null || true
+              $ANDROID_HOME/platform-tools/adb -s emulator-5554 shell input keyevent 82 2>/dev/null || true
               
               # Final verification
               echo ""
               echo "✅ EMULATOR FULLY READY!"
               echo "============================================================================"
               $ANDROID_HOME/platform-tools/adb devices -l
-              echo "Android Version: $($ANDROID_HOME/platform-tools/adb shell getprop ro.build.version.release | tr -d '\r\n')"
-              echo "API Level: $($ANDROID_HOME/platform-tools/adb shell getprop ro.build.version.sdk | tr -d '\r\n')"
-              echo "Device Model: $($ANDROID_HOME/platform-tools/adb shell getprop ro.product.model | tr -d '\r\n')"
+              echo "Android Version: $($ANDROID_HOME/platform-tools/adb -s emulator-5554 shell getprop ro.build.version.release | tr -d '\r\n')"
+              echo "API Level: $($ANDROID_HOME/platform-tools/adb -s emulator-5554 shell getprop ro.build.version.sdk | tr -d '\r\n')"
+              echo "Device Model: $($ANDROID_HOME/platform-tools/adb -s emulator-5554 shell getprop ro.product.model | tr -d '\r\n')"
               
               # Check Google Play availability
-              if $ANDROID_HOME/platform-tools/adb shell pm list packages | grep -q "com.android.vending"; then
+              if $ANDROID_HOME/platform-tools/adb -s emulator-5554 shell pm list packages | grep -q "com.android.vending"; then
                 echo "✅ Google Play Store: AVAILABLE"
               else
                 echo "⚠️  Google Play Store: NOT FOUND"
@@ -391,6 +422,9 @@ stages:
               if [ -f "src/main/resources/install_from_playstore.py" ]; then
                 echo "📦 Attempting Play Store installation..."
                 
+                # Create screenshot directory for debugging
+                mkdir -p playstore_screenshots
+                
                 # Set Python command
                 if command -v python3 &> /dev/null; then
                   PYTHON_CMD=python3
@@ -422,7 +456,8 @@ stages:
             inputs:
               PathtoPublish: '$(System.DefaultWorkingDirectory)/playstore_screenshots'
               ArtifactName: 'playstore-debug-screenshots'
-            condition: always()
+            condition: and(always(), eq(variables['Agent.JobStatus'], 'Succeeded'))
+            continueOnError: true
 
           - task: PublishBuildArtifacts@1
             displayName: 'Publish Play Store Video Recordings'
