@@ -32,7 +32,7 @@ variables:
 
 # Agent pool - Use Microsoft-hosted macOS agents for better Android emulator performance
 pool:
-  vmImage: 'macOS-13'  # Better emulator stability
+  vmImage: 'macOS-14'  # Latest stable macOS with better emulator support
 
 stages:
   - stage: Build
@@ -94,123 +94,164 @@ stages:
             displayName: 'Install Python Dependencies'
 
           - bash: |
-              echo "📱 Setting up Android Emulator with PROVEN approach..."
+              echo "📱 Setting up Android Emulator with ENHANCED approach..."
               echo "============================================================================"
               
               # Set environment variables
               export ANDROID_HOME=$ANDROID_SDK_ROOT
-              export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
+              export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin
               
               echo "ANDROID_HOME: $ANDROID_HOME"
+              echo "System Info:"
+              sysctl -n hw.ncpu
+              sysctl -n hw.memsize | awk '{print $0/1024/1024/1024 " GB"}'
               
-              # Kill any existing emulators or ADB
+              # Kill any existing processes
               $ANDROID_HOME/platform-tools/adb kill-server || true
               pkill -9 qemu-system || true
               pkill -9 emulator || true
-              sleep 2
+              sleep 3
               
               # Accept licenses
-              yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+              yes | sdkmanager --licenses || true
               
-              # Install required components using sdkmanager
-              echo "📦 Installing SDK components..."
-              $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install \
+              # Update SDK tools first
+              echo "📦 Updating SDK tools..."
+              sdkmanager --update
+              
+              # Install required components - try API 30 as fallback (more stable on CI)
+              echo "📦 Installing SDK components (trying API 30 for better stability)..."
+              sdkmanager --install \
                 "platform-tools" \
-                "platforms;android-34" \
-                "build-tools;34.0.0" \
+                "platforms;android-30" \
+                "build-tools;30.0.3" \
                 "emulator" \
-                "system-images;android-34;google_apis_playstore;x86_64" || {
-                echo "⚠️ sdkmanager install had issues, checking what's available..."
-              }
+                "system-images;android-30;google_apis_playstore;x86_64"
               
-              # Verify system image is installed
-              echo "🔍 Checking installed system images..."
-              $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list_installed | grep system-images
+              # Verify installation
+              echo "🔍 Verifying system images..."
+              sdkmanager --list_installed | grep system-images
               
-              # Create AVD with minimal configuration
-              echo "📱 Creating emulator AVD..."
-              echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
+              # Create AVD with optimal settings for CI
+              echo "📱 Creating emulator AVD (API 30 for stability)..."
+              echo "no" | avdmanager create avd \
                 --force \
-                --name "$(emulatorName)" \
-                --package "system-images;android-34;google_apis_playstore;x86_64" \
-                --device "pixel_5" \
-                --tag "google_apis_playstore" || {
-                echo "❌ Failed to create AVD"
-                exit 1
-              }
+                --name "ci_emulator" \
+                --package "system-images;android-30;google_apis_playstore;x86_64" \
+                --device "pixel_4" \
+                --tag "google_apis_playstore"
               
-              echo "✅ AVD created successfully"
+              # Configure AVD for better performance
+              AVD_PATH="$HOME/.android/avd/ci_emulator.avd"
+              
+              # Optimize config.ini
+              cat >> "$AVD_PATH/config.ini" << EOF
+              hw.cpu.ncore=2
+              hw.ramSize=4096
+              hw.keyboard=yes
+              hw.gpu.enabled=yes
+              hw.gpu.mode=swiftshader_indirect
+              disk.dataPartition.size=6G
+              fastboot.forceColdBoot=no
+              hw.camera.back=none
+              hw.camera.front=none
+              EOF
+              
+              echo "✅ AVD created and configured"
               $ANDROID_HOME/emulator/emulator -list-avds
               
             displayName: 'Setup Android SDK and AVD'
 
           - bash: |
-              echo "🚀 Starting Android Emulator with OPTIMIZED settings..."
+              echo "🚀 Starting Android Emulator with MAXIMUM COMPATIBILITY..."
               echo "============================================================================"
               
               export ANDROID_HOME=$ANDROID_SDK_ROOT
               export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
               
-              # Start ADB server
-              $ANDROID_HOME/platform-tools/adb start-server
-              sleep 2
-              
-              # Configure emulator for Azure CI
+              # Configure advanced features for hardware acceleration
               mkdir -p ~/.android
               cat > ~/.android/advancedFeatures.ini << EOF
               Vulkan = off
               GLDirectMem = on
               GLDMA = on
+              HostComposition = off
+              HVF = on
+              KVM = off
               EOF
               
-              # Start emulator with Azure-optimized flags
-              echo "Starting emulator in background..."
+              # Start ADB server
+              echo "Starting ADB server..."
+              $ANDROID_HOME/platform-tools/adb start-server
+              sleep 3
+              
+              # Start emulator with optimized flags for macOS CI
+              echo "Starting emulator with compatibility mode..."
               $ANDROID_HOME/emulator/emulator \
-                -avd "$(emulatorName)" \
+                -avd ci_emulator \
                 -no-window \
                 -no-audio \
                 -no-boot-anim \
                 -gpu swiftshader_indirect \
-                -no-snapshot \
-                -memory 3584 \
-                -partition-size 4096 \
+                -no-snapshot-save \
+                -memory 4096 \
                 -cores 2 \
-                -skin 1080x1920 \
                 -camera-back none \
                 -camera-front none \
-                -qemu -m 3584 \
+                -accel on \
+                -netdelay none \
+                -netspeed full \
+                -verbose \
+                -qemu -m 4096 \
                 > emulator.log 2>&1 &
               
               EMULATOR_PID=$!
               echo "Emulator PID: $EMULATOR_PID"
               
-              # Smart boot wait with multiple checks
-              echo "⏳ Waiting for emulator to boot (max 5 minutes)..."
+              # Enhanced boot wait logic
+              echo "⏳ Waiting for emulator to boot (max 8 minutes with health checks)..."
               
-              TIMEOUT=300
+              TIMEOUT=480
               ELAPSED=0
               BOOT_COMPLETE=false
+              DEVICE_ONLINE=false
               
               while [ $ELAPSED -lt $TIMEOUT ]; do
-                # Check if emulator process is still running
+                # Check emulator process health
                 if ! ps -p $EMULATOR_PID > /dev/null 2>&1; then
-                  echo "❌ Emulator process died!"
-                  tail -50 emulator.log
+                  echo "❌ Emulator process died unexpectedly!"
+                  echo "=== Last 100 lines of emulator log ==="
+                  tail -100 emulator.log
                   exit 1
                 fi
                 
-                # Check boot completed
-                BOOT_STATUS=$($ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed 2>&1 | tr -d '\r\n')
+                # Wait for device to appear
+                DEVICE_STATE=$($ANDROID_HOME/platform-tools/adb devices | grep emulator | awk '{print $2}')
                 
-                if [ "$BOOT_STATUS" = "1" ]; then
-                  echo "✅ Boot completed!"
-                  BOOT_COMPLETE=true
-                  break
+                if [ "$DEVICE_STATE" = "device" ]; then
+                  if [ "$DEVICE_ONLINE" = false ]; then
+                    echo "✅ Device is online!"
+                    DEVICE_ONLINE=true
+                  fi
+                  
+                  # Check boot completion
+                  BOOT_STATUS=$($ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed 2>&1 | tr -d '\r\n')
+                  
+                  if [ "$BOOT_STATUS" = "1" ]; then
+                    echo "✅ Boot completed successfully!"
+                    BOOT_COMPLETE=true
+                    break
+                  fi
+                elif [ "$DEVICE_STATE" = "offline" ] && [ $ELAPSED -gt 120 ]; then
+                  # If stuck offline for more than 2 minutes, try to recover
+                  echo "⚠️  Device stuck offline, attempting recovery..."
+                  $ANDROID_HOME/platform-tools/adb reconnect
+                  sleep 5
                 fi
                 
-                # Progress indicator
-                if [ $((ELAPSED % 15)) -eq 0 ]; then
-                  echo "  Still booting... (${ELAPSED}s / ${TIMEOUT}s)"
+                # Progress updates
+                if [ $((ELAPSED % 20)) -eq 0 ]; then
+                  echo "  Status: $DEVICE_STATE | Time: ${ELAPSED}s / ${TIMEOUT}s"
                   $ANDROID_HOME/platform-tools/adb devices
                 fi
                 
@@ -219,49 +260,70 @@ stages:
               done
               
               if [ "$BOOT_COMPLETE" = false ]; then
-                echo "❌ Emulator boot timeout!"
-                echo "=== Emulator Log ==="
-                tail -100 emulator.log
-                echo "=== ADB Devices ==="
+                echo "❌ Emulator failed to boot properly!"
+                echo ""
+                echo "=== Final Device Status ==="
                 $ANDROID_HOME/platform-tools/adb devices -l
+                echo ""
+                echo "=== Emulator Log (last 200 lines) ==="
+                tail -200 emulator.log
+                echo ""
+                echo "=== ADB Logcat Sample ==="
+                timeout 5 $ANDROID_HOME/platform-tools/adb logcat -d | tail -50 || true
                 exit 1
               fi
               
-              # Additional stabilization
-              echo "⏳ Waiting for package manager to be ready..."
-              for i in {1..20}; do
+              # Post-boot stabilization
+              echo "⏳ Stabilizing system services..."
+              sleep 10
+              
+              # Wait for package manager
+              for i in {1..30}; do
                 if $ANDROID_HOME/platform-tools/adb shell pm path android > /dev/null 2>&1; then
                   echo "✅ Package manager ready!"
                   break
                 fi
-                echo "  Checking package manager... ($i/20)"
-                sleep 3
+                if [ $i -eq 30 ]; then
+                  echo "⚠️  Package manager timeout (continuing anyway)"
+                fi
+                sleep 2
               done
               
-              # Disable animations for faster test execution
-              echo "🎬 Disabling animations..."
-              $ANDROID_HOME/platform-tools/adb shell settings put global window_animation_scale 0
-              $ANDROID_HOME/platform-tools/adb shell settings put global transition_animation_scale 0
-              $ANDROID_HOME/platform-tools/adb shell settings put global animator_duration_scale 0
+              # Wait for launcher
+              echo "⏳ Waiting for launcher..."
+              for i in {1..20}; do
+                if $ANDROID_HOME/platform-tools/adb shell dumpsys window | grep -q "mCurrentFocus"; then
+                  echo "✅ Launcher is ready!"
+                  break
+                fi
+                sleep 2
+              done
               
-              # Unlock screen
-              $ANDROID_HOME/platform-tools/adb shell input keyevent 82
+              # Performance optimizations
+              echo "🎬 Applying optimizations..."
+              $ANDROID_HOME/platform-tools/adb shell settings put global window_animation_scale 0 || true
+              $ANDROID_HOME/platform-tools/adb shell settings put global transition_animation_scale 0 || true
+              $ANDROID_HOME/platform-tools/adb shell settings put global animator_duration_scale 0 || true
+              $ANDROID_HOME/platform-tools/adb shell input keyevent 82 || true
               
               # Final verification
               echo ""
-              echo "✅ EMULATOR READY!"
+              echo "✅ EMULATOR FULLY READY!"
               echo "============================================================================"
               $ANDROID_HOME/platform-tools/adb devices -l
               echo "Android Version: $($ANDROID_HOME/platform-tools/adb shell getprop ro.build.version.release | tr -d '\r\n')"
               echo "API Level: $($ANDROID_HOME/platform-tools/adb shell getprop ro.build.version.sdk | tr -d '\r\n')"
+              echo "Device Model: $($ANDROID_HOME/platform-tools/adb shell getprop ro.product.model | tr -d '\r\n')"
               
-              # Check for Google Play
+              # Check Google Play availability
               if $ANDROID_HOME/platform-tools/adb shell pm list packages | grep -q "com.android.vending"; then
                 echo "✅ Google Play Store: AVAILABLE"
               else
                 echo "⚠️  Google Play Store: NOT FOUND"
               fi
+              
               echo "============================================================================"
+              echo "🎉 Ready for test execution!"
               
             displayName: 'Start Emulator and Wait for Boot'
 
