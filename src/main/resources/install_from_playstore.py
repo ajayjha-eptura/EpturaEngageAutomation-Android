@@ -1070,11 +1070,11 @@ class PlayStoreInstaller:
 
 def main():
     """Main execution function"""
-    print("=" * 60)
+    print("=" * 70)
     print("🏪 Google Play Store Automated Installer")
     print(f"🖥️  Platform: {platform.system()}")
     print(f"🤖 Optimized for Android 15 (API 35)")
-    print("=" * 60)
+    print("=" * 70)
     
     # Get credentials from command-line arguments or environment variables
     if len(sys.argv) >= 3:
@@ -1101,52 +1101,174 @@ def main():
     print(f"📧 Email: {email[:2]}***@***")
     print(f"📱 App: {app_name}")
     
+    # ============================================================================
+    # STEP 1: VERIFY GOOGLE PLAY STORE IS INSTALLED
+    # ============================================================================
+    print("\n" + "=" * 70)
+    print("📋 STEP 1: VERIFYING GOOGLE PLAY STORE INSTALLATION")
+    print("=" * 70)
+    
+    try:
+        print("🔍 Checking if Google Play Store app is installed on device...")
+        print("   Package to check: com.android.vending")
+        
+        # Check for Play Store package
+        result = subprocess.run(
+            ['adb', 'shell', 'pm', 'list', 'packages', 'com.android.vending'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode == 0 and 'com.android.vending' in result.stdout:
+            print("   ✅ Google Play Store is INSTALLED")
+            print(f"   📦 Package found: {result.stdout.strip()}")
+            
+            # Get Play Store version
+            try:
+                version_result = subprocess.run(
+                    ['adb', 'shell', 'dumpsys', 'package', 'com.android.vending', '|', 'grep', 'versionName'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    shell=True
+                )
+                if version_result.returncode == 0:
+                    print(f"   📱 Version info: {version_result.stdout.strip()}")
+            except:
+                pass
+                
+        else:
+            print("   ❌ Google Play Store is NOT INSTALLED")
+            print("   ⚠️  The device may not have Google Play Services")
+            print("   ⚠️  Installation will likely fail without Play Store")
+            print(f"   📋 ADB response: {result.stdout if result.stdout else 'No output'}")
+    except Exception as e:
+        print(f"   ⚠️  Could not verify Play Store installation: {e}")
+        print("   ⏩ Proceeding anyway...")
+    
+    print("=" * 70)
+    
+    # ============================================================================
+    # STEP 2: CHECK IF TARGET APP IS ALREADY INSTALLED
+    # ============================================================================
+    print("\n" + "=" * 70)
+    print("📋 STEP 2: CHECKING IF EPTURA ENGAGE APP IS ALREADY INSTALLED")
+    print("=" * 70)
+    
+    target_package = "com.condecosoftware.condeco"
+    print(f"🔍 Target app package: {target_package}")
+    
+    try:
+        result = subprocess.run(
+            ['adb', 'shell', 'pm', 'list', 'packages', target_package],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode == 0 and target_package in result.stdout:
+            print(f"   ✅ App is ALREADY INSTALLED")
+            print(f"   📦 Package found: {result.stdout.strip()}")
+            print("\n🎉 No installation needed! App is already present on device.")
+            print("=" * 70)
+            sys.exit(0)
+        else:
+            print(f"   ℹ️  App is NOT installed")
+            print(f"   📋 Will proceed with installation from Play Store")
+    except Exception as e:
+        print(f"   ⚠️  Could not check app installation: {e}")
+        print("   ⏩ Proceeding with installation...")
+    
+    print("=" * 70)
+    
+    # ============================================================================
+    # STEP 3: INITIALIZE INSTALLER AND START INSTALLATION PROCESS
+    # ============================================================================
+    print("\n" + "=" * 70)
+    print("📋 STEP 3: INITIALIZING PLAY STORE INSTALLER")
+    print("=" * 70)
+    
     installer = PlayStoreInstaller(email, password)
     installation_successful = False
+    exit_code = 1
     
     try:
         # Start video recording early (before driver setup)
+        print("\n🎬 Starting screen recording for debugging...")
         installer.start_recording()
         
-        # Method 1: Direct deep link installation (faster, doesn't require login)
-        print("\n📍 Method 1: Trying direct deep link installation...")
-        if installer.install_via_deep_link("com.condecosoftware.condeco"):
-            print("\n✅ Installation successful!")
+        # ========================================================================
+        # STEP 4: METHOD 1 - DIRECT DEEP LINK INSTALLATION
+        # ========================================================================
+        print("\n" + "=" * 70)
+        print("📋 STEP 4: METHOD 1 - DIRECT DEEP LINK INSTALLATION")
+        print("=" * 70)
+        print("ℹ️  This method opens the app page directly in Play Store")
+        print("ℹ️  Faster method, doesn't require login automation")
+        print("=" * 70)
+        
+        if installer.install_via_deep_link(target_package):
+            print("\n✅ Installation successful via Method 1!")
             installation_successful = True
-            return 0
-        
-        # Method 2: Full automation with search (requires login)
-        print("\n📍 Method 2: Trying full Play Store automation...")
-        if not installer.setup_driver():
-            print("❌ Failed to setup Appium driver")
-            return 1
-        
-        # Start recording after driver is ready (if not already started)
-        if not installer.recording_process and not installer.recording_file:
-            installer.start_recording()
-        
-        if not installer.open_play_store():
-            print("❌ Failed to open Play Store")
-            return 1
-        
-        # Try to login (may already be logged in)
-        installer.login_to_google_account()
-        
-        # Search and install app
-        if installer.search_and_install_app(app_name):
-            print("\n✅ Installation successful!")
-            installation_successful = True
-            return 0
+            exit_code = 0
         else:
-            print("\n⚠️  Installation may not have completed")
-            return 1
+            print("\n⚠️  Method 1 failed, trying Method 2...")
+            
+            # ====================================================================
+            # STEP 5: METHOD 2 - FULL PLAY STORE AUTOMATION WITH LOGIN
+            # ====================================================================
+            print("\n" + "=" * 70)
+            print("📋 STEP 5: METHOD 2 - FULL PLAY STORE AUTOMATION")
+            print("=" * 70)
+            print("ℹ️  This method automates the complete Play Store flow:")
+            print("    1. Setup Appium driver")
+            print("    2. Open Play Store")
+            print("    3. Login with Google credentials")
+            print("    4. Search for app")
+            print("    5. Install app")
+            print("=" * 70)
+            
+            if not installer.setup_driver():
+                print("❌ Failed to setup Appium driver")
+                exit_code = 1
+            else:
+                # Start recording after driver is ready (if not already started)
+                if not installer.recording_process and not installer.recording_file:
+                    installer.start_recording()
+                
+                if not installer.open_play_store():
+                    print("❌ Failed to open Play Store")
+                    exit_code = 1
+                else:
+                    # Try to login (may already be logged in)
+                    installer.login_to_google_account()
+                    
+                    # Search and install app
+                    if installer.search_and_install_app(app_name):
+                        print("\n✅ Installation successful via Method 2!")
+                        installation_successful = True
+                        exit_code = 0
+                    else:
+                        print("\n⚠️  Installation may not have completed")
+                        exit_code = 1
             
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}")
+        print("\n" + "=" * 70)
+        print("❌ UNEXPECTED ERROR DURING INSTALLATION")
+        print("=" * 70)
+        print(f"Error: {e}")
         import traceback
         traceback.print_exc()
-        return 1
+        exit_code = 1
     finally:
+        # ========================================================================
+        # FINAL STEP: CLEANUP AND VERIFICATION
+        # ========================================================================
+        print("\n" + "=" * 70)
+        print("📋 FINAL STEP: CLEANUP AND VERIFICATION")
+        print("=" * 70)
+        
         # Always stop recording and save video (especially important on failure for debugging)
         try:
             installer.stop_recording()
@@ -1160,3 +1282,42 @@ def main():
             print(f"⚠️  Could not stop recording properly: {e}")
         
         installer.cleanup()
+        
+        # Final verification
+        print("\n🔍 Final verification - checking if app is now installed...")
+        try:
+            result = subprocess.run(
+                ['adb', 'shell', 'pm', 'list', 'packages', target_package],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0 and target_package in result.stdout:
+                print(f"✅ VERIFICATION SUCCESSFUL: App is installed!")
+                print(f"   Package: {result.stdout.strip()}")
+                installation_successful = True
+                exit_code = 0
+            else:
+                print(f"❌ VERIFICATION FAILED: App is NOT installed")
+                print(f"   Package searched: {target_package}")
+                exit_code = 1
+        except Exception as e:
+            print(f"⚠️  Could not perform final verification: {e}")
+        
+        print("=" * 70)
+        
+        if installation_successful:
+            print("\n🎉 INSTALLATION COMPLETED SUCCESSFULLY!")
+        else:
+            print("\n❌ INSTALLATION FAILED")
+            print("📸 Check debug screenshots in: playstore_screenshots/")
+            print("🎥 Check video recording in: playstore-recordings/")
+        
+        print("=" * 70)
+    
+    sys.exit(exit_code)
+
+
+if __name__ == '__main__':
+    main()
