@@ -414,7 +414,6 @@ stages:
                   -memory 4096 \
                   -cores 2 \
                   -wipe-data \
-                  -verbose \
                   > emulator.log 2>&1 &
               else
                 # x86_64 emulator - use software rendering for Azure CI stability
@@ -432,7 +431,6 @@ stages:
                   -camera-front none \
                   -wipe-data \
                   -qemu -m 3072 \
-                  -verbose \
                   > emulator.log 2>&1 &
               fi
               
