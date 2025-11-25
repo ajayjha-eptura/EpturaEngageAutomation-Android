@@ -11,6 +11,8 @@ import sys
 import time
 import subprocess
 import platform
+import base64
+from datetime import datetime
 from appium import webdriver
 from appium.options.android import UiAutomator2Options
 from appium.webdriver.common.appiumby import AppiumBy
@@ -26,6 +28,9 @@ class PlayStoreInstaller:
         self.is_macos = platform.system() == 'Darwin'
         self.is_windows = platform.system() == 'Windows'
         self.temp_dir = '/tmp' if self.is_macos else ('C:\\Temp' if self.is_windows else '/tmp')
+        self.recording_process = None
+        self.recording_file = None
+        self.video_dir = None
         
         # Ensure temp directory exists on Windows
         if self.is_windows and not os.path.exists(self.temp_dir):
@@ -33,6 +38,191 @@ class PlayStoreInstaller:
                 os.makedirs(self.temp_dir)
             except:
                 self.temp_dir = os.path.expanduser('~\\AppData\\Local\\Temp')
+        
+        # Setup video directory
+        self.setup_video_directory()
+    
+    def setup_video_directory(self):
+        """Setup directory for storing video recordings"""
+        try:
+            # Try to use workspace directory first, fallback to temp
+            workspace_dir = os.getcwd()
+            video_dir = os.path.join(workspace_dir, 'playstore-recordings')
+            
+            if not os.path.exists(video_dir):
+                os.makedirs(video_dir)
+            
+            self.video_dir = video_dir
+            print(f"📹 Video recordings will be saved to: {video_dir}")
+        except Exception as e:
+            print(f"⚠️  Could not create video directory: {e}")
+            self.video_dir = self.temp_dir
+    
+    def start_screen_recording_adb(self):
+        """Start screen recording using ADB screenrecord (fallback method)"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.recording_file = os.path.join(self.video_dir, f"playstore_install_{timestamp}.mp4")
+            device_path = f"/sdcard/playstore_recording_{timestamp}.mp4"
+            
+            print(f"🎥 Starting screen recording via ADB...")
+            print(f"   Device path: {device_path}")
+            
+            # Start recording in background with time limit (10 minutes max)
+            # --time-limit in seconds, --bit-rate for quality
+            cmd = ['adb', 'shell', 'screenrecord', '--verbose', 
+                   '--time-limit', '600', '--bit-rate', '4000000', device_path]
+            
+            self.recording_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                shell=self.is_windows
+            )
+            
+            # Store device path for later retrieval
+            self.recording_file = (self.recording_file, device_path)
+            
+            print("✅ Screen recording started (ADB method)")
+            return True
+            
+        except Exception as e:
+            print(f"⚠️  Could not start ADB screen recording: {e}")
+            return False
+    
+    def start_screen_recording_appium(self):
+        """Start screen recording using Appium's built-in method"""
+        try:
+            if not self.driver:
+                print("⚠️  No Appium driver available for recording")
+                return False
+            
+            print("🎥 Starting screen recording via Appium...")
+            
+            # Start recording with Appium (automatically handles encoding)
+            # Options: videoQuality (low/medium/high), timeLimit (seconds)
+            self.driver.start_recording_screen(
+                videoQuality='medium',
+                timeLimit='600',  # 10 minutes max
+                bitRate='4000000'  # 4 Mbps
+            )
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.recording_file = os.path.join(self.video_dir, f"playstore_install_{timestamp}.mp4")
+            
+            print("✅ Screen recording started (Appium method)")
+            return True
+            
+        except Exception as e:
+            print(f"⚠️  Could not start Appium screen recording: {e}")
+            return False
+    
+    def stop_and_save_recording_adb(self):
+        """Stop ADB screen recording and pull the file"""
+        try:
+            if not self.recording_process:
+                return False
+            
+            print("⏹️  Stopping screen recording...")
+            
+            # Send interrupt signal to stop recording
+            self.recording_process.terminate()
+            time.sleep(2)
+            
+            # Get the device path
+            local_path, device_path = self.recording_file
+            
+            # Wait a bit for file to be finalized
+            time.sleep(3)
+            
+            # Pull the recording from device
+            print(f"📥 Pulling recording from device...")
+            result = self._run_adb_command(['pull', device_path, local_path], timeout=60)
+            
+            if result and result.returncode == 0:
+                # Clean up device file
+                self._run_adb_command(['shell', 'rm', device_path])
+                
+                # Check if file exists and has size
+                if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+                    file_size = os.path.getsize(local_path) / (1024 * 1024)  # MB
+                    print(f"✅ Recording saved: {local_path}")
+                    print(f"   File size: {file_size:.2f} MB")
+                    return True
+                else:
+                    print(f"⚠️  Recording file is empty or missing")
+                    return False
+            else:
+                print(f"⚠️  Failed to pull recording from device")
+                return False
+                
+        except Exception as e:
+            print(f"⚠️  Error stopping ADB recording: {e}")
+            return False
+    
+    def stop_and_save_recording_appium(self):
+        """Stop Appium screen recording and save the file"""
+        try:
+            if not self.driver or not self.recording_file:
+                return False
+            
+            print("⏹️  Stopping screen recording...")
+            
+            # Stop recording and get base64 encoded video
+            video_base64 = self.driver.stop_recording_screen()
+            
+            # Decode and save the video file
+            print(f"💾 Saving recording...")
+            with open(self.recording_file, 'wb') as f:
+                f.write(base64.b64decode(video_base64))
+            
+            # Check if file was saved successfully
+            if os.path.exists(self.recording_file) and os.path.getsize(self.recording_file) > 0:
+                file_size = os.path.getsize(self.recording_file) / (1024 * 1024)  # MB
+                print(f"✅ Recording saved: {self.recording_file}")
+                print(f"   File size: {file_size:.2f} MB")
+                return True
+            else:
+                print(f"⚠️  Recording file is empty or missing")
+                return False
+                
+        except Exception as e:
+            print(f"⚠️  Error stopping Appium recording: {e}")
+            return False
+    
+    def start_recording(self):
+        """Start screen recording using best available method"""
+        print("\n" + "="*60)
+        print("🎬 STARTING VIDEO RECORDING")
+        print("="*60)
+        
+        # Try Appium method first (cleaner, no cleanup needed)
+        if self.driver and self.start_screen_recording_appium():
+            return True
+        
+        # Fallback to ADB method
+        if self.start_screen_recording_adb():
+            return True
+        
+        print("⚠️  Could not start recording with any method")
+        return False
+    
+    def stop_recording(self):
+        """Stop screen recording and save the file"""
+        print("\n" + "="*60)
+        print("🎬 STOPPING VIDEO RECORDING")
+        print("="*60)
+        
+        # Try to stop based on which method was used
+        if self.recording_process:
+            # ADB method was used
+            return self.stop_and_save_recording_adb()
+        elif self.driver and self.recording_file:
+            # Appium method was used
+            return self.stop_and_save_recording_appium()
+        else:
+            print("⚠️  No active recording found")
+            return False
     
     def _run_adb_command(self, args, timeout=10):
         """Cross-platform ADB command execution"""
@@ -388,6 +578,7 @@ class PlayStoreInstaller:
             ]
             
             text_entered = False
+            search_field = None
             for selector in search_field_selectors:
                 try:
                     search_field = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
@@ -395,23 +586,92 @@ class PlayStoreInstaller:
                     time.sleep(1)
                     search_field.send_keys(app_name)
                     text_entered = True
-                    print(f"✅ Text entered successfully")
+                    print(f"✅ Text entered successfully using selector: {selector[:60]}...")
                     time.sleep(2)
                     break
                 except Exception as e:
+                    print(f"⚠️  Selector failed: {selector[:60]}... - {str(e)[:100]}")
                     continue
             
             if not text_entered:
                 print("❌ Could not enter search text")
                 return False
             
-            # Press Enter or click search button
-            try:
-                self.driver.press_keycode(66)  # KEYCODE_ENTER
-                print("✅ Pressed Enter key")
-                time.sleep(5)  # Wait for search results
-            except:
-                print("⚠️  Could not press Enter key")
+            # Press Enter or click search button - try multiple methods
+            print("🔍 Attempting to execute search...")
+            search_executed = False
+            
+            # Method 1: Try to press Enter key via Appium driver
+            if not search_executed:
+                try:
+                    self.driver.press_keycode(66)  # KEYCODE_ENTER
+                    print("✅ Pressed Enter key via press_keycode")
+                    search_executed = True
+                    time.sleep(5)  # Wait for search results
+                except Exception as e:
+                    print(f"⚠️  Method 1 (press_keycode) failed: {str(e)[:100]}")
+            
+            # Method 2: Try to press Enter using ADB directly
+            if not search_executed:
+                try:
+                    result = self._run_adb_command(['shell', 'input', 'keyevent', 'KEYCODE_ENTER'])
+                    if result and result.returncode == 0:
+                        print("✅ Pressed Enter key via ADB input keyevent")
+                        search_executed = True
+                        time.sleep(5)
+                    else:
+                        print("⚠️  Method 2 (ADB keyevent) failed")
+                except Exception as e:
+                    print(f"⚠️  Method 2 (ADB keyevent) exception: {str(e)[:100]}")
+            
+            # Method 3: Try to click on search button/icon
+            if not search_executed:
+                search_button_selectors = [
+                    'new UiSelector().descriptionContains("Search")',
+                    'new UiSelector().resourceId("com.android.vending:id/search_button")',
+                    'new UiSelector().className("android.widget.ImageButton").descriptionContains("Search")',
+                    'new UiSelector().resourceId("com.android.vending:id/action_button")'
+                ]
+                
+                for selector in search_button_selectors:
+                    try:
+                        search_button = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+                        search_button.click()
+                        print(f"✅ Clicked search button using selector: {selector[:60]}...")
+                        search_executed = True
+                        time.sleep(5)
+                        break
+                    except:
+                        continue
+            
+            # Method 4: Try sending newline character directly to the field
+            if not search_executed and search_field:
+                try:
+                    from selenium.webdriver.common.keys import Keys
+                    search_field.send_keys(Keys.ENTER)
+                    print("✅ Sent ENTER key via send_keys")
+                    search_executed = True
+                    time.sleep(5)
+                except Exception as e:
+                    print(f"⚠️  Method 4 (send_keys ENTER) failed: {str(e)[:100]}")
+            
+            # Method 5: Try using ADB input text with newline
+            if not search_executed:
+                try:
+                    # Tap Enter key using keycode 66
+                    result = self._run_adb_command(['shell', 'input', 'keyevent', '66'])
+                    if result and result.returncode == 0:
+                        print("✅ Pressed Enter key via ADB keycode 66")
+                        search_executed = True
+                        time.sleep(5)
+                    else:
+                        print("⚠️  Method 5 (ADB keycode 66) failed")
+                except Exception as e:
+                    print(f"⚠️  Method 5 (ADB keycode 66) exception: {str(e)[:100]}")
+            
+            if not search_executed:
+                print("⚠️  Could not execute search, but will try to proceed anyway")
+                time.sleep(3)  # Give it a moment in case search auto-executed
             
             # Click on the app from search results
             print("📱 Selecting app from results...")
@@ -634,7 +894,7 @@ class PlayStoreInstaller:
             print("⏳ Waiting for installation to complete...")
             print("   Monitoring both Play Store UI and package manager...")
             # macOS typically faster, so shorter timeout
-            max_wait = 360 if self.is_macos else (420 if self.is_windows else 360)  # 6 min on macOS, 7 min on Windows
+            max_wait = 360 if self.is_macos else (420 if self.is_windows else 360) # 6 min on macOS, 7 min on Windows
             wait_time = 0
             check_interval = 10
             last_status = ""
@@ -746,12 +1006,17 @@ def main():
     print(f"📱 App: {app_name}")
     
     installer = PlayStoreInstaller(email, password)
+    installation_successful = False
     
     try:
+        # Start video recording early (before driver setup)
+        installer.start_recording()
+        
         # Method 1: Direct deep link installation (faster, doesn't require login)
         print("\n📍 Method 1: Trying direct deep link installation...")
         if installer.install_via_deep_link("com.condecosoftware.condeco"):
             print("\n✅ Installation successful!")
+            installation_successful = True
             return 0
         
         # Method 2: Full automation with search (requires login)
@@ -759,6 +1024,10 @@ def main():
         if not installer.setup_driver():
             print("❌ Failed to setup Appium driver")
             return 1
+        
+        # Start recording after driver is ready (if not already started)
+        if not installer.recording_process and not installer.recording_file:
+            installer.start_recording()
         
         if not installer.open_play_store():
             print("❌ Failed to open Play Store")
@@ -770,6 +1039,7 @@ def main():
         # Search and install app
         if installer.search_and_install_app(app_name):
             print("\n✅ Installation successful!")
+            installation_successful = True
             return 0
         else:
             print("\n⚠️  Installation may not have completed")
@@ -781,8 +1051,17 @@ def main():
         traceback.print_exc()
         return 1
     finally:
+        # Always stop recording and save video (especially important on failure for debugging)
+        try:
+            installer.stop_recording()
+            
+            if not installation_successful and installer.recording_file:
+                # Provide clear message about where to find the recording for debugging
+                actual_file = installer.recording_file[0] if isinstance(installer.recording_file, tuple) else installer.recording_file
+                print(f"\n🎥 Video recording saved for debugging: {actual_file}")
+                print(f"   Review this video to see what went wrong during installation")
+        except Exception as e:
+            print(f"⚠️  Could not stop recording properly: {e}")
+        
         installer.cleanup()
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+       

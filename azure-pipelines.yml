@@ -424,6 +424,13 @@ stages:
               ArtifactName: 'playstore-debug-screenshots'
             condition: always()
 
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Play Store Video Recordings'
+            inputs:
+              PathtoPublish: '$(System.DefaultWorkingDirectory)/playstore-recordings'
+              ArtifactName: 'playstore-video-recordings'
+            condition: always()
+
           - task: DownloadBuildArtifacts@1
             displayName: 'Download Build Artifacts'
             inputs:
