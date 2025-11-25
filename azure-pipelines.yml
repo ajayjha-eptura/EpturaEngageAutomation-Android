@@ -163,16 +163,16 @@ stages:
             displayName: 'Setup Android SDK and AVD'
 
           - bash: |
-              echo "🚀 Starting Android Emulator with IMPROVED ADB HANDLING..."
+              echo "🚀 Starting Android Emulator with OPTIMIZED BOOT..."
               echo "============================================================================"
               
               export ANDROID_HOME=$ANDROID_SDK_ROOT
               export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
               
-              # Kill and restart ADB to ensure clean state
-              echo "Preparing ADB..."
-              $ANDROID_HOME/platform-tools/adb kill-server || true
-              sleep 2
+              # Start ADB server FIRST (before emulator) to avoid offline state issues
+              echo "Starting ADB server early..."
+              $ANDROID_HOME/platform-tools/adb start-server
+              sleep 3
               
               # Configure advanced features for hardware acceleration
               mkdir -p ~/.android
@@ -185,7 +185,7 @@ stages:
               KVM = off
               EOF
               
-              # Start emulator with optimized flags for macOS CI
+              # Start emulator with optimized flags - use -wipe-data for faster clean boot
               echo "Starting emulator in background..."
               $ANDROID_HOME/emulator/emulator \
                 -avd ci_emulator \
@@ -193,7 +193,8 @@ stages:
                 -no-audio \
                 -no-boot-anim \
                 -gpu swiftshader_indirect \
-                -no-snapshot-save \
+                -no-snapshot \
+                -wipe-data \
                 -memory 4096 \
                 -cores 2 \
                 -camera-back none \
@@ -201,34 +202,25 @@ stages:
                 -accel on \
                 -netdelay none \
                 -netspeed full \
-                -verbose \
                 -qemu -m 4096 \
                 > emulator.log 2>&1 &
               
               EMULATOR_PID=$!
               echo "Emulator PID: $EMULATOR_PID"
               
-              # Wait for emulator to appear in process list
-              echo "⏳ Waiting for emulator process to stabilize..."
-              sleep 15
+              # Wait for emulator to appear in ADB
+              echo "⏳ Waiting for emulator to appear in ADB..."
+              sleep 10
               
-              # Now start ADB server (after emulator is running)
-              echo "Starting ADB server..."
-              $ANDROID_HOME/platform-tools/adb start-server
-              sleep 5
+              # Optimized boot wait logic - less aggressive polling
+              echo "⏳ Waiting for emulator to boot (max 8 minutes)..."
               
-              # Force ADB to reconnect
-              echo "Connecting ADB to emulator..."
-              $ANDROID_HOME/platform-tools/adb devices
-              sleep 3
-              
-              # Enhanced boot wait logic with better timeout
-              echo "⏳ Waiting for emulator to boot (max 10 minutes)..."
-              
-              TIMEOUT=600
+              TIMEOUT=480
               ELAPSED=0
               BOOT_COMPLETE=false
               DEVICE_ONLINE=false
+              ADB_RESTART_COUNT=0
+              MAX_ADB_RESTARTS=2
               
               while [ $ELAPSED -lt $TIMEOUT ]; do
                 # Check emulator process health
@@ -242,21 +234,22 @@ stages:
                 # Get device state
                 DEVICE_STATE=$($ANDROID_HOME/platform-tools/adb devices | grep emulator | awk '{print $2}')
                 
-                # If no device found, try to restart ADB connection
-                if [ -z "$DEVICE_STATE" ] && [ $ELAPSED -gt 30 ]; then
-                  if [ $((ELAPSED % 60)) -eq 0 ]; then
-                    echo "⚠️  No device found, restarting ADB server..."
+                # Only restart ADB if really needed and not too many times
+                if [ -z "$DEVICE_STATE" ] && [ $ELAPSED -gt 120 ] && [ $ADB_RESTART_COUNT -lt $MAX_ADB_RESTARTS ]; then
+                  if [ $((ELAPSED % 120)) -eq 0 ]; then
+                    echo "⚠️  No device found after 2+ minutes, restarting ADB (attempt $((ADB_RESTART_COUNT + 1))/$MAX_ADB_RESTARTS)..."
                     $ANDROID_HOME/platform-tools/adb kill-server
                     sleep 2
                     $ANDROID_HOME/platform-tools/adb start-server
                     sleep 3
+                    ADB_RESTART_COUNT=$((ADB_RESTART_COUNT + 1))
                     $ANDROID_HOME/platform-tools/adb devices
                   fi
                 fi
                 
                 if [ "$DEVICE_STATE" = "device" ]; then
                   if [ "$DEVICE_ONLINE" = false ]; then
-                    echo "✅ Device is online!"
+                    echo "✅ Device is online at ${ELAPSED}s!"
                     DEVICE_ONLINE=true
                   fi
                   
@@ -264,70 +257,57 @@ stages:
                   BOOT_STATUS=$($ANDROID_HOME/platform-tools/adb -s emulator-5554 shell getprop sys.boot_completed 2>&1 | tr -d '\r\n')
                   
                   if [ "$BOOT_STATUS" = "1" ]; then
-                    echo "✅ Boot completed successfully!"
+                    echo "✅ Boot completed successfully in ${ELAPSED}s!"
                     BOOT_COMPLETE=true
                     break
                   fi
                 elif [ "$DEVICE_STATE" = "offline" ]; then
-                  if [ $ELAPSED -gt 60 ] && [ $((ELAPSED % 30)) -eq 0 ]; then
-                    # Try to recover from offline state
-                    echo "⚠️  Device stuck offline, attempting recovery..."
-                    $ANDROID_HOME/platform-tools/adb kill-server
-                    sleep 2
-                    $ANDROID_HOME/platform-tools/adb start-server
-                    sleep 3
+                  # Device offline - wait longer before trying recovery (only once)
+                  if [ $ELAPSED -gt 120 ] && [ $ADB_RESTART_COUNT -lt $MAX_ADB_RESTARTS ]; then
+                    if [ $((ELAPSED % 120)) -eq 0 ]; then
+                      echo "⚠️  Device stuck offline, attempting recovery (attempt $((ADB_RESTART_COUNT + 1))/$MAX_ADB_RESTARTS)..."
+                      $ANDROID_HOME/platform-tools/adb kill-server
+                      sleep 2
+                      $ANDROID_HOME/platform-tools/adb start-server
+                      sleep 3
+                      ADB_RESTART_COUNT=$((ADB_RESTART_COUNT + 1))
+                    fi
                   fi
                 fi
                 
-                # Progress updates every 15 seconds
-                if [ $((ELAPSED % 15)) -eq 0 ]; then
-                  echo "  Status: $DEVICE_STATE | Time: ${ELAPSED}s / ${TIMEOUT}s"
-                  $ANDROID_HOME/platform-tools/adb devices
+                # Progress updates every 20 seconds (less verbose)
+                if [ $((ELAPSED % 20)) -eq 0 ]; then
+                  echo "  Status: ${DEVICE_STATE:-none} | Time: ${ELAPSED}s / ${TIMEOUT}s"
                 fi
                 
-                sleep 5
-                ELAPSED=$((ELAPSED + 5))
+                # Poll every 10 seconds instead of 5 (reduce overhead)
+                sleep 10
+                ELAPSED=$((ELAPSED + 10))
               done
               
               if [ "$BOOT_COMPLETE" = false ]; then
-                echo "❌ Emulator failed to boot properly within timeout!"
+                echo "❌ Emulator failed to boot within timeout!"
                 echo ""
                 echo "=== Final Device Status ==="
                 $ANDROID_HOME/platform-tools/adb devices -l
                 echo ""
                 echo "=== Emulator Log (last 200 lines) ==="
                 tail -200 emulator.log
-                echo ""
-                echo "=== Checking if emulator is actually running ==="
-                ps aux | grep emulator | grep -v grep || true
                 exit 1
               fi
               
-              # Post-boot stabilization
-              echo "⏳ Stabilizing system services..."
-              sleep 10
+              # Minimal post-boot stabilization
+              echo "⏳ Waiting for system stability (5s)..."
+              sleep 5
               
-              # Wait for package manager
-              echo "⏳ Waiting for package manager..."
-              for i in {1..30}; do
+              # Quick package manager check
+              echo "⏳ Verifying package manager..."
+              for i in {1..15}; do
                 if $ANDROID_HOME/platform-tools/adb -s emulator-5554 shell pm path android > /dev/null 2>&1; then
                   echo "✅ Package manager ready!"
                   break
                 fi
-                if [ $i -eq 30 ]; then
-                  echo "⚠️  Package manager timeout (continuing anyway)"
-                fi
-                sleep 2
-              done
-              
-              # Wait for launcher
-              echo "⏳ Waiting for launcher..."
-              for i in {1..20}; do
-                if $ANDROID_HOME/platform-tools/adb -s emulator-5554 shell dumpsys window 2>/dev/null | grep -q "mCurrentFocus"; then
-                  echo "✅ Launcher is ready!"
-                  break
-                fi
-                sleep 2
+                sleep 1
               done
               
               # Performance optimizations
@@ -347,10 +327,10 @@ stages:
               echo "Device Model: $($ANDROID_HOME/platform-tools/adb -s emulator-5554 shell getprop ro.product.model | tr -d '\r\n')"
               
               # Check Google Play availability
-              if $ANDROID_HOME/platform-tools/adb -s emulator-5554 shell pm list packages | grep -q "com.android.vending"; then
+              if $ANDROID_HOME/platform-tools/adb -s emulator-5554 shell pm list packages 2>/dev/null | grep -q "com.android.vending"; then
                 echo "✅ Google Play Store: AVAILABLE"
               else
-                echo "⚠️  Google Play Store: NOT FOUND"
+                echo "⚠️  Google Play Store: NOT FOUND (will need APK file for app installation)"
               fi
               
               echo "============================================================================"
@@ -401,26 +381,84 @@ stages:
               ADB="$ANDROID_HOME/platform-tools/adb"
               PACKAGE_NAME="com.condecosoftware.condeco"
               
+              # CRITICAL: Verify device is online and ready before proceeding
+              echo "🔍 Verifying device readiness..."
+              MAX_WAIT=60
+              WAITED=0
+              DEVICE_READY=false
+              
+              while [ $WAITED -lt $MAX_WAIT ]; do
+                DEVICE_STATE=$("$ADB" devices | grep emulator | awk '{print $2}')
+                
+                if [ "$DEVICE_STATE" = "device" ]; then
+                  # Double-check with a simple ADB command
+                  if "$ADB" shell getprop sys.boot_completed 2>/dev/null | grep -q "1"; then
+                    echo "✅ Device is online and ready!"
+                    DEVICE_READY=true
+                    break
+                  fi
+                fi
+                
+                if [ "$DEVICE_STATE" = "offline" ]; then
+                  echo "⚠️  Device offline at ${WAITED}s, waiting... (State: $DEVICE_STATE)"
+                elif [ -z "$DEVICE_STATE" ]; then
+                  echo "⚠️  No device found at ${WAITED}s, waiting..."
+                fi
+                
+                sleep 3
+                WAITED=$((WAITED + 3))
+              done
+              
+              if [ "$DEVICE_READY" = false ]; then
+                echo "❌ Device not ready after ${MAX_WAIT}s!"
+                echo "Current device state:"
+                "$ADB" devices -l
+                exit 1
+              fi
+              
+              # Additional stability wait
+              echo "⏳ Waiting 5s for stability..."
+              sleep 5
+              
               # Check if already installed
-              if "$ADB" shell pm list packages | grep -q "$PACKAGE_NAME"; then
+              echo "🔍 Checking if app is already installed..."
+              if "$ADB" shell pm list packages 2>/dev/null | grep -q "$PACKAGE_NAME"; then
                 echo "✅ App is already installed!"
                 exit 0
               fi
               
               # Method 1: Check for APK in repo
+              echo "🔍 Looking for APK file in repository..."
               if [ -f "app/Eptura_Engage.apk" ] || [ -f "Eptura_Engage.apk" ]; then
                 APK_PATH=$(find . -name "Eptura_Engage.apk" -o -name "condeco.apk" | head -1)
                 echo "✅ Found APK: $APK_PATH"
-                "$ADB" install -r "$APK_PATH"
-                if [ $? -eq 0 ]; then
-                  echo "✅ APK installed successfully!"
-                  exit 0
+                
+                # Verify device is still ready before install
+                if "$ADB" shell getprop sys.boot_completed 2>/dev/null | grep -q "1"; then
+                  echo "📦 Installing APK..."
+                  "$ADB" install -r "$APK_PATH"
+                  if [ $? -eq 0 ]; then
+                    echo "✅ APK installed successfully!"
+                    exit 0
+                  else
+                    echo "⚠️  APK installation failed, trying Play Store method..."
+                  fi
+                else
+                  echo "⚠️  Device went offline before APK install!"
                 fi
+              else
+                echo "⚠️  No APK file found in repository"
               fi
               
               # Method 2: Use Python script for Play Store
               if [ -f "src/main/resources/install_from_playstore.py" ]; then
                 echo "📦 Attempting Play Store installation..."
+                
+                # Verify device is still ready
+                if ! "$ADB" shell getprop sys.boot_completed 2>/dev/null | grep -q "1"; then
+                  echo "⚠️  Device offline, waiting 10s for recovery..."
+                  sleep 10
+                fi
                 
                 # Create screenshot directory for debugging
                 mkdir -p playstore_screenshots
@@ -437,13 +475,16 @@ stages:
                 }
                 
                 # Verify installation
-                if "$ADB" shell pm list packages | grep -q "$PACKAGE_NAME"; then
+                if "$ADB" shell pm list packages 2>/dev/null | grep -q "$PACKAGE_NAME"; then
                   echo "✅ Play Store installation successful!"
                   exit 0
                 fi
               fi
               
               echo "❌ Could not install app - please provide APK file or configure Play Store credentials"
+              echo ""
+              echo "=== Final Device Status ==="
+              "$ADB" devices -l
               exit 1
             displayName: 'Install Eptura Engage App'
             continueOnError: true
