@@ -759,7 +759,6 @@ class PlayStoreInstaller:
             
             if not email_entered:
                 print("   ❌ FAILED: Could not find email input field")
-                self._take_debug_screenshot("login_email_field_not_found")
                 print("="*70 + "\n")
                 return False
             
@@ -813,7 +812,6 @@ class PlayStoreInstaller:
             
             if not password_entered:
                 print("   ❌ FAILED: Could not find password input field")
-                self._take_debug_screenshot("login_password_field_not_found")
                 print("="*70 + "\n")
                 return False
             
@@ -868,22 +866,8 @@ class PlayStoreInstaller:
             print(f"\n❌ CRITICAL ERROR during login: {e}")
             print(f"   Exception type: {type(e).__name__}")
             print(f"   Exception details: {str(e)}")
-            self._take_debug_screenshot("login_critical_error")
             print("="*70 + "\n")
             return False
-    
-    def _take_debug_screenshot(self, filename_prefix):
-        """Take a debug screenshot and save it"""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            screenshot_dir = os.path.join(os.getcwd(), 'playstore_screenshots')
-            os.makedirs(screenshot_dir, exist_ok=True)
-            
-            screenshot_path = os.path.join(screenshot_dir, f"{filename_prefix}_{timestamp}.png")
-            self.driver.save_screenshot(screenshot_path)
-            print(f"   📸 Debug screenshot saved: {screenshot_path}")
-        except Exception as e:
-            print(f"   ⚠️  Could not save screenshot: {e}")
     
     def _install_via_url(self, package_name):
         """Helper method to install app via direct Play Store URL
@@ -1128,7 +1112,7 @@ class PlayStoreInstaller:
             
             # Wait for results
             time.sleep(5)
-            self._take_debug_screenshot("fallback_method_search_results")
+            # self._take_debug_screenshot("fallback_method_search_results")
             
             # Find and click the app
             app_clicked = False
@@ -1164,7 +1148,7 @@ class PlayStoreInstaller:
             # Wait for app page to load
             print("   ⏳ Waiting for app page to load...")
             time.sleep(10)
-            self._take_debug_screenshot("fallback_method_app_page")
+            # self._take_debug_screenshot("fallback_method_app_page")
             
             # Click Install button
             print("   📲 Looking for Install button...")
@@ -1208,7 +1192,6 @@ class PlayStoreInstaller:
             print(f"\n❌ Error in fallback method: {e}")
             import traceback
             traceback.print_exc()
-            self._take_debug_screenshot("fallback_method_error")
             return False
 
     def search_and_install_app(self, app_name="Eptura Engage"):
@@ -1272,7 +1255,7 @@ class PlayStoreInstaller:
             
             if not search_opened:
                 print("   ⚠️  Could not open search, trying to proceed anyway")
-                self._take_debug_screenshot("search_open_failed")
+                # self._take_debug_screenshot("search_open_failed")
             
             # Step 2: Type "Eptura Engage" in search field
             print(f"\n[Step 2/6] Typing search text: '{app_name}'...")
@@ -1303,7 +1286,7 @@ class PlayStoreInstaller:
             
             if not text_entered:
                 print("   ❌ FAILED: Could not type search text")
-                self._take_debug_screenshot("search_text_entry_failed")
+                # self._take_debug_screenshot("search_text_entry_failed")
                 print("="*70 + "\n")
                 return False
             
@@ -1339,7 +1322,7 @@ class PlayStoreInstaller:
             
             if not search_executed:
                 print("   ⚠️  Could not press search button, trying to proceed anyway")
-                self._take_debug_screenshot("search_button_press_failed")
+                # self._take_debug_screenshot("search_button_press_failed")
                 time.sleep(3)
             
             # Step 4: Wait for and click on the Eptura Engage app from search results
@@ -1387,9 +1370,8 @@ class PlayStoreInstaller:
             
             if not app_clicked:
                 print("   ⚠️  Could not find app in search results")
-                self._take_debug_screenshot("app_not_found_in_results")
+                # self._take_debug_screenshot("app_not_found_in_results")
                 print("   Trying direct package URL as fallback...")
-                # Fallback to direct URL if search fails
                 if self._install_via_url("com.condecosoftware.condeco"):
                     return True
                 print("   ❌ All methods failed")
@@ -1404,8 +1386,8 @@ class PlayStoreInstaller:
             print("   ⏳ Waiting for app detail page to fully load (15 seconds)...")
             time.sleep(15)  # Increased from 5 to 15 seconds
             
-            # Take a screenshot before trying to find Install button
-            self._take_debug_screenshot("before_install_button_search")
+            # Remove screenshot before trying to find Install button
+            # self._take_debug_screenshot("before_install_button_search")
             
             for attempt in range(10):  # Increased from 5 to 10 attempts
                 print(f"   Attempt {attempt + 1}/10:")
@@ -1418,7 +1400,7 @@ class PlayStoreInstaller:
                     print(f"      ✅ On app detail page (found: {page_check.text if hasattr(page_check, 'text') else 'Eptura'})")
                 except:
                     print(f"      ⚠️  May not be on app detail page, retrying...")
-                    self._take_debug_screenshot(f"not_on_app_page_attempt_{attempt + 1}")
+                    # self._take_debug_screenshot(f"not_on_app_page_attempt_{attempt + 1}")
                     time.sleep(5)
                     continue
                 
@@ -1507,27 +1489,17 @@ class PlayStoreInstaller:
                     break
                 
                 if attempt < 9:
-                    # Take screenshot before retry to see what's on screen
-                    self._take_debug_screenshot(f"install_button_not_found_attempt_{attempt + 1}")
+                    # Remove screenshot before retry
+                    # self._take_debug_screenshot(f"install_button_not_found_attempt_{attempt + 1}")
                     wait_time = 5 if attempt < 5 else 8  # Longer waits after 5 attempts
                     print(f"   ⏳ Retrying after {wait_time} seconds...")
                     time.sleep(wait_time)
             
             if not install_clicked:
                 print("   ❌ FAILED: Could not find or click Install button")
-                self._take_debug_screenshot("install_button_not_found_final")
+                # self._take_debug_screenshot("install_button_not_found_final")
                 
-                # Last resort: Try to dump the UI hierarchy for debugging
-                try:
-                    print("   🔍 Attempting to get page source for debugging...")
-                    page_source = self.driver.page_source
-                    debug_file = os.path.join(os.getcwd(), 'playstore_screenshots', 'page_source_debug.xml')
-                    with open(debug_file, 'w', encoding='utf-8') as f:
-                        f.write(page_source)
-                    print(f"   📄 Page source saved to: {debug_file}")
-                except Exception as e:
-                    print(f"   ⚠️  Could not save page source: {e}")
-                
+                # Remove page source dump for debugging
                 print("="*70 + "\n")
                 return False
             
@@ -1603,14 +1575,14 @@ class PlayStoreInstaller:
                 return True
             
             print("❌ Installation failed - app was not installed within timeout period")
-            self._take_debug_screenshot("installation_timeout")
+            # self._take_debug_screenshot("installation_timeout")
             print("="*70 + "\n")
             return False
         except Exception as e:
             print(f"\n❌ CRITICAL ERROR during app installation: {e}")
             print(f"   Exception type: {type(e).__name__}")
             print(f"   Exception details: {str(e)}")
-            self._take_debug_screenshot("install_critical_error")
+            # self._take_debug_screenshot("install_critical_error")
             print("="*70 + "\n")
             return False
     

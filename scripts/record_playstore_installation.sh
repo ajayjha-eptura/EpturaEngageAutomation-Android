@@ -64,8 +64,9 @@ echo "✅ Device is ready"
 echo ""
 
 # Start screen recording
+# Use max 180 seconds (3 minutes) due to Android screenrecord limit
 echo "🎬 Starting screen recording..."
-"$ADB" shell screenrecord --verbose --time-limit 600 --bit-rate 4000000 "$RECORDING_DEVICE_PATH" > recording_output.log 2>&1 &
+"$ADB" shell screenrecord --verbose --time-limit 180 --bit-rate 4000000 "$RECORDING_DEVICE_PATH" > recording_output.log 2>&1 &
 RECORDING_PID=$!
 
 echo "✅ Screen recording started"
