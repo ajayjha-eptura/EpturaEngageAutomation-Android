@@ -180,6 +180,14 @@ stages:
               $ANDROID_HOME/platform-tools/adb start-server
               sleep 3
               
+              # Kill all existing emulator and adb processes
+              pkill -9 emulator || true
+              pkill -9 qemu-system-x86_64 || true
+              pkill -9 adb || true
+              
+              # Regenerate ADB keys to avoid authorization issues
+              rm -f ~/.android/adbkey ~/.android/adbkey.pub || true
+              
               # Configure advanced features for hardware acceleration
               mkdir -p ~/.android
               cat > ~/.android/advancedFeatures.ini << EOF
@@ -191,7 +199,7 @@ stages:
               KVM = off
               EOF
               
-              # Start emulator - REMOVED -wipe-data to prevent offline state
+              # Start emulator with -wipe-data to prevent offline state
               echo "Starting emulator in background..."
               $ANDROID_HOME/emulator/emulator \
                 -avd ci_emulator \
@@ -207,6 +215,7 @@ stages:
                 -accel on \
                 -netdelay none \
                 -netspeed full \
+                -wipe-data \
                 -qemu -m 4096 \
                 > emulator.log 2>&1 &
               
