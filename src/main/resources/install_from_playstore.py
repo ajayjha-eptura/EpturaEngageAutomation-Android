@@ -1254,6 +1254,101 @@ class PlayStoreInstaller:
             traceback.print_exc()
             return False
     
+    def _search_app_in_playstore(self, app_name):
+        """
+        Automate Play Store search for the app by name.
+        Returns True if app is found, False otherwise.
+        """
+        try:
+            # Open search bar
+            search_selectors = [
+                ('search_bar_hint', 'new UiSelector().resourceId("com.android.vending:id/search_bar_hint")'),
+                ('search_box_idle_text', 'new UiSelector().resourceId("com.android.vending:id/search_box_idle_text")'),
+                ('Search description', 'new UiSelector().descriptionContains("Search")'),
+            ]
+            for selector_name, selector in search_selectors:
+                try:
+                    search_icon = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+                    search_icon.click()
+                    time.sleep(2)
+                    break
+                except:
+                    continue
+            # Type app name
+            search_field_selectors = [
+                ('search_bar_text_input', 'new UiSelector().resourceId("com.android.vending:id/search_bar_text_input")'),
+                ('EditText class', 'new UiSelector().className("android.widget.EditText")'),
+            ]
+            for selector_name, selector in search_field_selectors:
+                try:
+                    search_field = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+                    search_field.clear()
+                    time.sleep(1)
+                    search_field.send_keys(app_name)
+                    time.sleep(2)
+                    break
+                except:
+                    continue
+            # Press Enter to search
+            try:
+                self.driver.press_keycode(66)  # KEYCODE_ENTER
+                time.sleep(3)
+            except:
+                self._run_adb_command(['shell', 'input', 'keyevent', 'KEYCODE_ENTER'])
+                time.sleep(3)
+            # Look for app in results
+            search_patterns = [app_name, "Eptura", "Condeco"]
+            for pattern in search_patterns:
+                try:
+                    elements = self.driver.find_elements(AppiumBy.ANDROID_UIAUTOMATOR,
+                        f'new UiSelector().textContains("{pattern}")')
+                    if elements:
+                        elements[0].click()
+                        time.sleep(3)
+                        return True
+                except:
+                    continue
+            return False
+        except Exception as e:
+            print(f"Error in _search_app_in_playstore: {e}")
+            return False
+
+    def _install_app_from_playstore(self, app_package):
+        """
+        Automate clicking the Install button and wait for installation.
+        Returns True if installation succeeds, False otherwise.
+        """
+        try:
+            install_texts = ["Install", "INSTALL", "Update", "UPDATE", "Get", "OPEN", "Open"]
+            for attempt in range(8):
+                for text in install_texts:
+                    try:
+                        install_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
+                            f'new UiSelector().textContains("{text}")')
+                        button_text = install_btn.text if hasattr(install_btn, 'text') else text
+                        if button_text.upper() in ["OPEN"]:
+                            return True  # Already installed
+                        install_btn.click()
+                        time.sleep(5)
+                        # Wait for installation
+                        max_wait = 300
+                        wait_time = 0
+                        check_interval = 10
+                        while wait_time < max_wait:
+                            result = self._run_adb_command(['shell', 'pm', 'list', 'packages', app_package], timeout=10)
+                            if result and app_package in result.stdout:
+                                return True
+                            time.sleep(check_interval)
+                            wait_time += check_interval
+                        return False
+                    except:
+                        continue
+                time.sleep(5)
+            return False
+        except Exception as e:
+            print(f"Error in _install_app_from_playstore: {e}")
+            return False
+    
     def search_and_install_app(self, app_name="Eptura Engage"):
         """Search for app and install it using Play Store app only (no browser-style search)"""
         print("\n" + "="*70)
@@ -1389,3 +1484,13 @@ class PlayStoreInstaller:
         print(f"Installation Result: {'SUCCESS' if success else 'FAILED'}")
         print(f"Duration: {duration} seconds")
         print("============================================================\n")
+
+if __name__ == "__main__":
+    email = os.environ.get("GOOGLE_EMAIL")
+    password = os.environ.get("GOOGLE_PASSWORD")
+    if not email or not password:
+        print("❌ ERROR: GOOGLE_EMAIL and GOOGLE_PASSWORD environment variables must be set.")
+        sys.exit(1)
+    installer = PlayStoreInstaller(email, password)
+    success = installer.install_eptura_engage_app()
+    sys.exit(0 if success else 1)
