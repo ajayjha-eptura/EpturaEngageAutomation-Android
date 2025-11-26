@@ -1232,6 +1232,9 @@ class PlayStoreInstaller:
             # ...existing code for traditional Play Store search...
             # (Retain only Play Store app-based search and install logic)
             # ...existing code...
+        except Exception as e:
+            print(f"❌ Error in search_and_install_app: {e}")
+            return False
     
     def install_eptura_engage_app(self):
         """
@@ -1349,7 +1352,7 @@ class PlayStoreInstaller:
             return False
 
     def _install_app_from_playstore(self, package_name):
-        """Click Install button and wait for installation to start."""
+        """Click Install button and wait for installation to start and complete."""
         try:
             install_texts = ["Install", "INSTALL", "Update", "UPDATE", "Get", "Open", "OPEN"]
             for attempt in range(5):
@@ -1364,14 +1367,42 @@ class PlayStoreInstaller:
                         install_btn.click()
                         print(f"   ✅ Clicked '{button_text}' button")
                         time.sleep(5)
-                        return True
-                    except:
+                        # After clicking Install, wait for installation to complete
+                        max_wait = 300  # 5 minutes
+                        wait_time = 0
+                        check_interval = 10
+                        while wait_time < max_wait:
+                            # Check if installed
+                            result = self._run_adb_command(['shell', 'pm', 'list', 'packages', package_name], timeout=10)
+                            if result and package_name in result.stdout:
+                                print(f"   ✅ Installation completed! (verified in {wait_time}s)")
+                                return True
+                            # Check for Open button
+                            try:
+                                open_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
+                                    'new UiSelector().text("Open")')
+                                print(f"   ✅ Installation completed! (Open button appeared)")
+                                return True
+                            except:
+                                pass
+                            time.sleep(check_interval)
+                            wait_time += check_interval
+                            if wait_time % 30 == 0:
+                                print(f"      Still installing... ({wait_time}/{max_wait}s)")
+                        print(f"   ⚠️  Installation timeout after {max_wait}s")
+                        # Take screenshot for debugging
+                        self.take_screenshot("install_timeout")
+                        return False
+                    except Exception as e:
+                        print(f"   ⚠️  Could not find/click '{text}' button: {e}")
                         continue
                 time.sleep(3)
             print("   ❌ Could not find or click Install button")
+            self.take_screenshot("install_button_not_found")
             return False
         except Exception as e:
             print(f"   ❌ Error in _install_app_from_playstore: {e}")
+            self.take_screenshot("install_exception")
             return False
 
     def _verify_app_installed(self, package_name):

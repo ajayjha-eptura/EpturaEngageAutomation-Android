@@ -12,12 +12,6 @@ APP_NAME="${3:-Eptura Engage}"
 APP_PACKAGE="com.condecosoftware.condeco"
 ADB="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/platform-tools/adb"
 
-echo ""
-echo "============================================================"
-echo "PLAY STORE INSTALLATION PROCESS"
-echo "============================================================"
-echo ""
-
 # Verify prerequisites
 if [ -z "$GOOGLE_EMAIL" ] || [ -z "$GOOGLE_PASSWORD" ]; then
     echo "ERROR: Google credentials not provided"
@@ -37,7 +31,6 @@ if [ "$DEVICE_STATUS" != "device" ]; then
     exit 1
 fi
 echo "Device is ready."
-echo ""
 
 echo "Step 2: Starting Play Store installation process..."
 PYTHON_CMD="python3"

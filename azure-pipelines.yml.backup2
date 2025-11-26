@@ -119,27 +119,27 @@ stages:
               echo "📦 Updating SDK tools..."
               sdkmanager --update
               
-              # Use google_apis_playstore for Play Store automation
-              echo "📦 Installing SDK components (API 31 google_apis_playstore for Play Store support)..."
+              # Use google_apis instead of playstore - more stable in CI
+              echo "📦 Installing SDK components (API 30 google_apis for CI stability)..."
               sdkmanager --install \
                 "platform-tools" \
-                "platforms;android-31" \
-                "build-tools;31.0.0" \
+                "platforms;android-30" \
+                "build-tools;30.0.3" \
                 "emulator" \
-                "system-images;android-31;google_apis_playstore;x86_64"
+                "system-images;android-30;google_apis;x86_64"
               
               # Verify installation
               echo "🔍 Verifying system images..."
               sdkmanager --list_installed | grep system-images
               
-              # Create AVD with Play Store support
-              echo "📱 Creating emulator AVD (API 31 google_apis_playstore)..."
+              # Create AVD with optimal settings for CI
+              echo "📱 Creating emulator AVD (API 30 google_apis)..."
               echo "no" | avdmanager create avd \
                 --force \
                 --name "ci_emulator" \
-                --package "system-images;android-31;google_apis_playstore;x86_64" \
+                --package "system-images;android-30;google_apis;x86_64" \
                 --device "pixel_4" \
-                --tag "google_apis_playstore"
+                --tag "google_apis"
               
               # Configure AVD for better performance
               AVD_PATH="$HOME/.android/avd/ci_emulator.avd"
@@ -180,14 +180,6 @@ stages:
               $ANDROID_HOME/platform-tools/adb start-server
               sleep 3
               
-              # Kill all existing emulator and adb processes
-              pkill -9 emulator || true
-              pkill -9 qemu-system-x86_64 || true
-              pkill -9 adb || true
-              
-              # Regenerate ADB keys to avoid authorization issues
-              rm -f ~/.android/adbkey ~/.android/adbkey.pub || true
-              
               # Configure advanced features for hardware acceleration
               mkdir -p ~/.android
               cat > ~/.android/advancedFeatures.ini << EOF
@@ -199,7 +191,7 @@ stages:
               KVM = off
               EOF
               
-              # Start emulator with -wipe-data to prevent offline state
+              # Start emulator - REMOVED -wipe-data to prevent offline state
               echo "Starting emulator in background..."
               $ANDROID_HOME/emulator/emulator \
                 -avd ci_emulator \
@@ -215,7 +207,6 @@ stages:
                 -accel on \
                 -netdelay none \
                 -netspeed full \
-                -wipe-data \
                 -qemu -m 4096 \
                 > emulator.log 2>&1 &
               
@@ -491,12 +482,31 @@ stages:
               mkdir -p playstore_screenshots
               mkdir -p playstore-recordings
               
-              # ENHANCED: Use video recording wrapper script for full capture
-              # Make script executable
-              chmod +x scripts/record_playstore_installation.sh
-
-              # Run installation with full video recording
-              ./scripts/record_playstore_installation.sh "\$GOOGLE_EMAIL" "\$GOOGLE_PASSWORD" "Eptura Engage"
+              # Set Python command
+              if command -v python3 &> /dev/null; then
+                PYTHON_CMD=python3
+              else
+                PYTHON_CMD=python
+              fi
+              
+              echo "🐍 Python command: $PYTHON_CMD"
+              echo ""
+              echo "────────────────────────────────────────────────────────────────────"
+              echo "📱 The script will perform the following steps:"
+              echo "   1. Open Google Play Store"
+              echo "   2. Login with provided Google account credentials"
+              echo "   3. Search for 'Eptura Engage' app"
+              echo "   4. Click Install button"
+              echo "   5. Wait for installation to complete"
+              echo "   6. Verify app is installed"
+              echo "────────────────────────────────────────────────────────────────────"
+              echo ""
+              
+              # Run Play Store installation with full output
+              echo "🚀 Starting automated Play Store installation..."
+              echo ""
+              
+              $PYTHON_CMD src/main/resources/install_from_playstore.py "$GOOGLE_EMAIL" "$GOOGLE_PASSWORD" "Eptura Engage"
               INSTALL_RESULT=$?
               
               echo ""
@@ -508,7 +518,6 @@ stages:
                 echo "✅✅✅ PLAY STORE INSTALLATION SUCCESSFUL! ✅✅✅"
                 echo "   Package: $PACKAGE_NAME"
                 echo "   Method: Google Play Store"
-                echo "   Video: Available in playstore-recordings/"
                 echo "════════════════════════════════════════════════════════════════════"
                 exit 0
               else
@@ -517,8 +526,7 @@ stages:
                 echo "   Package searched: $PACKAGE_NAME"
                 echo ""
                 echo "📸 Debug screenshots saved to: playstore_screenshots/"
-                echo "🎥 Video recording saved to: playstore-recordings/"
-                echo "   ⚠️  REVIEW THE VIDEO to see what went wrong!"
+                echo "🎥 Video recordings saved to: playstore-recordings/"
                 echo "════════════════════════════════════════════════════════════════════"
                 exit 1
               fi
