@@ -389,6 +389,23 @@ class PlayStoreInstaller:
             print(f"❌ Error executing ADB command: {e}")
             return None
     
+    def print_device_info(self):
+        """Prints Android version, API level, and device model"""
+        try:
+            api_result = self._run_adb_command(['shell', 'getprop', 'ro.build.version.sdk'])
+            version_result = self._run_adb_command(['shell', 'getprop', 'ro.build.version.release'])
+            model_result = self._run_adb_command(['shell', 'getprop', 'ro.product.model'])
+            api_level = api_result.stdout.strip() if api_result else 'Unknown'
+            android_version = version_result.stdout.strip() if version_result else 'Unknown'
+            device_model = model_result.stdout.strip() if model_result else 'Unknown'
+            print("\n================ DEVICE INFO ================")
+            print(f"📱 Device Model: {device_model}")
+            print(f"🤖 Android Version: {android_version}")
+            print(f"🔢 API Level: {api_level}")
+            print("============================================\n")
+        except Exception as e:
+            print(f"⚠️  Could not fetch device info: {e}")
+    
     def check_emulator_ready(self):
         """Verify emulator is fully booted and services are ready"""
         print("🔍 Verifying emulator readiness...")
@@ -1814,6 +1831,3 @@ class PlayStoreInstaller:
             return False
         except:
             return False
-    
-    def _search_via_browser_method(self, app_name="Eptura Engage", max_retries=3):
-        """
