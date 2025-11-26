@@ -452,25 +452,45 @@ class PlayStoreInstaller:
         print("✅ Emulator is ready")
         return True
     
+    def recover_emulator_adb_connection(self, max_retries=5, wait_per_retry=10):
+        """Attempt to recover emulator from offline ADB state."""
+        print("\n================ ADB/EMULATOR RECOVERY ================")
+        for attempt in range(max_retries):
+            result = self._run_adb_command(['devices'])
+            if result and 'emulator' in result.stdout and 'offline' not in result.stdout:
+                print(f"✅ Emulator is online (attempt {attempt+1})")
+                return True
+            print(f"⚠️  Emulator offline (attempt {attempt+1}/{max_retries}), restarting ADB server...")
+            self._run_adb_command(['kill-server'])
+            time.sleep(2)
+            self._run_adb_command(['start-server'])
+            time.sleep(wait_per_retry)
+        # Final check
+        result = self._run_adb_command(['devices'])
+        if result and 'emulator' in result.stdout and 'offline' not in result.stdout:
+            print("✅ Emulator is online after recovery attempts.")
+            return True
+        print("❌ Emulator remains offline after recovery attempts.")
+        return False
+
     def wait_for_emulator_ready(self, max_wait=180):
         """Wait for emulator to be fully ready with all services"""
         print(f"⏳ Waiting for emulator to be fully ready (max {max_wait}s)...")
-        
+        # Add recovery logic before waiting
+        self.recover_emulator_adb_connection()
         start_time = time.time()
         while time.time() - start_time < max_wait:
             if self.check_emulator_ready():
-                # Additional wait for stability - macOS typically faster than Windows
                 stability_wait = 8 if self.is_macos else (15 if self.is_windows else 10)
                 print(f"⏳ Waiting {stability_wait} seconds for system stability...")
                 time.sleep(stability_wait)
                 return True
-            
             elapsed = int(time.time() - start_time)
             if elapsed % 15 == 0:
                 print(f"  Still waiting... ({elapsed}/{max_wait}s)")
-            
+            # Try recovery if offline
+            self.recover_emulator_adb_connection()
             time.sleep(5)
-        
         print(f"❌ Emulator not ready after {max_wait} seconds")
         return False
         
@@ -480,7 +500,7 @@ class PlayStoreInstaller:
         print("🔧 Setting up Appium driver for Play Store...")
         print(f"🖥️  Platform: {platform.system()}")
         
-        # First ensure emulator is ready
+        # Ensure emulator is ready and recover if needed
         if not self.wait_for_emulator_ready():
             print("⚠️  Proceeding anyway, but may encounter issues...")
         
@@ -997,7 +1017,7 @@ class PlayStoreInstaller:
             # Step 1: Check if Play Store is installed
             print("\n[Step 1/6] Checking Google Play Store installation...")
             result = self._run_adb_command(['shell', 'pm', 'list', 'packages', 'com.android.vending'], timeout=10)
-            
+            self.take_screenshot("step1_playstore_check")
             if not result or 'com.android.vending' not in result.stdout:
                 print("   ⚠️  Google Play Store NOT installed")
                 print("   📦 Installing Google Play Store...")
@@ -1190,7 +1210,34 @@ class PlayStoreInstaller:
                         
                         # Wait for installation
                         print("   ⏳ Waiting for installation to complete...")
-                        return self._wait_for_installation("com.condecosoftware.condeco")
+                        max_wait = 300  # 5 minutes
+                        wait_time = 0
+                        check_interval = 10
+                        
+                        while wait_time < max_wait:
+                            # Check if installed
+                            result = self._run_adb_command(['shell', 'pm', 'list', 'packages', package_name], timeout=10)
+                            if result and package_name in result.stdout:
+                                print(f"   ✅ Installation completed! (verified in {wait_time}s)")
+                                return True
+                            
+                            # Check for Open button
+                            try:
+                                open_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
+                                                                   'new UiSelector().text("Open")')
+                                print(f"   ✅ Installation completed! (Open button appeared)")
+                                return True
+                            except:
+                                pass
+                            
+                            time.sleep(check_interval)
+                            wait_time += check_interval
+                            
+                            if wait_time % 30 == 0:
+                                print(f"      Still installing... ({wait_time}/{max_wait}s)")
+                        
+                        print(f"   ⚠️  Installation timeout after {max_wait}s")
+                        return False
                     except:
                         continue
                 
@@ -1250,168 +1297,95 @@ class PlayStoreInstaller:
         app_package = "com.condecosoftware.condeco"
         app_name = "Eptura Engage"
         print("\n========== EPTURA ENGAGE INSTALLATION FLOW ==========")
+        start_time = time.time()  # Track start time for duration
         print("Step 1: Checking Play Store installation...")
         result = self._run_adb_command(['shell', 'pm', 'list', 'packages', 'com.android.vending'], timeout=10)
+        time.sleep(3)
+        self.take_screenshot("step1_playstore_check")
         if not result or 'com.android.vending' not in result.stdout:
             print("   ❌ Play Store NOT installed. Attempting to download/install Play Store APK...")
-            # Placeholder: Download/install logic here
             print("   ⚠️  Play Store installation logic not implemented. Please use an emulator with Play Store.")
+            time.sleep(2)
+            self.take_screenshot("step1_playstore_not_found")
+            self._print_installation_summary(False, start_time)
             return False
         print("   ✅ Play Store is installed.")
+        time.sleep(2)
 
         print("\nStep 2: Launching Play Store app...")
-        if not self.open_play_store():
+        playstore_launched = self.open_play_store()
+        time.sleep(5)
+        self.take_screenshot("step2_playstore_launch")
+        if not playstore_launched:
             print("   ❌ Failed to launch Play Store app.")
+            self._print_installation_summary(False, start_time)
             return False
         print("   ✅ Play Store app launched.")
+        time.sleep(2)
 
         print("\nStep 3: Logging in with provided credentials...")
         login_result = self.login_to_google_account()
+        time.sleep(5)
+        self.take_screenshot("step3_login")
         if not login_result:
             print("   ❌ Login failed. Please check credentials or emulator state.")
+            self._print_installation_summary(False, start_time)
             return False
         print("   ✅ Login successful.")
+        time.sleep(2)
 
         print(f"\nStep 4: Searching for '{app_name}' in Play Store...")
         search_success = self._search_app_in_playstore(app_name)
+        time.sleep(5)
+        self.take_screenshot("step4_search")
         if not search_success:
             print(f"   ❌ Failed to search for '{app_name}'.")
+            self._print_installation_summary(False, start_time)
             return False
         print(f"   ✅ Found '{app_name}' in Play Store.")
+        time.sleep(2)
 
         print(f"\nStep 5: Installing '{app_name}'...")
         install_success = self._install_app_from_playstore(app_package)
+        time.sleep(5)
+        self.take_screenshot("step5_install")
         if not install_success:
             print(f"   ❌ Failed to install '{app_name}'.")
+            self._print_installation_summary(False, start_time)
             return False
         print(f"   ✅ '{app_name}' installation initiated.")
+        time.sleep(2)
 
         print(f"\nStep 6: Verifying installation of '{app_name}'...")
-        verify_result = self._verify_app_installed(app_package)
-        if verify_result:
-            print(f"   ✅ '{app_name}' is installed successfully!")
-            return True
-        else:
-            print(f"   ❌ '{app_name}' installation verification failed.")
-            return False
+        # Add robust wait and retry for installation verification
+        max_wait = 300  # 5 minutes
+        check_interval = 10
+        wait_time = 0
+        verified = False
+        while wait_time < max_wait:
+            verify_result = self._verify_app_installed(app_package)
+            time.sleep(2)
+            self.take_screenshot(f"step6_verification_{wait_time}s")
+            if verify_result:
+                print(f"   ✅ '{app_name}' is installed successfully!")
+                verified = True
+                break
+            time.sleep(check_interval)
+            wait_time += check_interval
+            if wait_time % 30 == 0:
+                print(f"      Still waiting for installation... ({wait_time}/{max_wait}s)")
+        if not verified:
+            print(f"   ❌ '{app_name}' installation verification failed after {max_wait}s.")
+            self.take_screenshot("step6_verification_failed")
+        self._print_installation_summary(verified, start_time)
+        return verified
 
-    def _search_app_in_playstore(self, app_name):
-        """Search for the app in Play Store and click on it. Returns True if found and clicked."""
-        try:
-            # Open search
-            search_selectors = [
-                ('search_bar_hint', 'new UiSelector().resourceId("com.android.vending:id/search_bar_hint")'),
-                ('search_box_idle_text', 'new UiSelector().resourceId("com.android.vending:id/search_box_idle_text")'),
-                ('Search description', 'new UiSelector().descriptionContains("Search")'),
-            ]
-            for selector_name, selector in search_selectors:
-                try:
-                    search_icon = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
-                    search_icon.click()
-                    time.sleep(2)
-                    break
-                except:
-                    continue
-            # Type app name
-            search_field_selectors = [
-                ('search_bar_text_input', 'new UiSelector().resourceId("com.android.vending:id/search_bar_text_input")'),
-                ('EditText class', 'new UiSelector().className("android.widget.EditText")'),
-            ]
-            for selector_name, selector in search_field_selectors:
-                try:
-                    search_field = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
-                    search_field.clear()
-                    time.sleep(1)
-                    search_field.send_keys(app_name)
-                    time.sleep(2)
-                    break
-                except:
-                    continue
-            # Press Enter
-            try:
-                self.driver.press_keycode(66)  # KEYCODE_ENTER
-                time.sleep(5)
-            except:
-                self._run_adb_command(['shell', 'input', 'keyevent', 'KEYCODE_ENTER'])
-                time.sleep(5)
-            # Find and click the app
-            search_patterns = [app_name, "Eptura", "Condeco"]
-            for pattern in search_patterns:
-                try:
-                    elements = self.driver.find_elements(AppiumBy.ANDROID_UIAUTOMATOR,
-                        f'new UiSelector().textContains("{pattern}")')
-                    if elements:
-                        elements[0].click()
-                        time.sleep(3)
-                        return True
-                except:
-                    continue
-            return False
-        except Exception as e:
-            print(f"   ❌ Error in _search_app_in_playstore: {e}")
-            return False
-
-    def _install_app_from_playstore(self, package_name):
-        """Click Install button and wait for installation to start and complete."""
-        try:
-            install_texts = ["Install", "INSTALL", "Update", "UPDATE", "Get", "Open", "OPEN"]
-            for attempt in range(5):
-                for text in install_texts:
-                    try:
-                        install_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
-                            f'new UiSelector().textContains("{text}")')
-                        button_text = install_btn.text if hasattr(install_btn, 'text') else text
-                        if button_text.upper() in ["OPEN"]:
-                            print(f"   ✅ App already installed!")
-                            return True
-                        install_btn.click()
-                        print(f"   ✅ Clicked '{button_text}' button")
-                        time.sleep(5)
-                        # After clicking Install, wait for installation to complete
-                        max_wait = 300  # 5 minutes
-                        wait_time = 0
-                        check_interval = 10
-                        while wait_time < max_wait:
-                            # Check if installed
-                            result = self._run_adb_command(['shell', 'pm', 'list', 'packages', package_name], timeout=10)
-                            if result and package_name in result.stdout:
-                                print(f"   ✅ Installation completed! (verified in {wait_time}s)")
-                                return True
-                            # Check for Open button
-                            try:
-                                open_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
-                                    'new UiSelector().text("Open")')
-                                print(f"   ✅ Installation completed! (Open button appeared)")
-                                return True
-                            except:
-                                pass
-                            time.sleep(check_interval)
-                            wait_time += check_interval
-                            if wait_time % 30 == 0:
-                                print(f"      Still installing... ({wait_time}/{max_wait}s)")
-                        print(f"   ⚠️  Installation timeout after {max_wait}s")
-                        # Take screenshot for debugging
-                        self.take_screenshot("install_timeout")
-                        return False
-                    except Exception as e:
-                        print(f"   ⚠️  Could not find/click '{text}' button: {e}")
-                        continue
-                time.sleep(3)
-            print("   ❌ Could not find or click Install button")
-            self.take_screenshot("install_button_not_found")
-            return False
-        except Exception as e:
-            print(f"   ❌ Error in _install_app_from_playstore: {e}")
-            self.take_screenshot("install_exception")
-            return False
-
-    def _verify_app_installed(self, package_name):
-        """Verify if the app is installed on the device."""
-        try:
-            result = self._run_adb_command(['shell', 'pm', 'list', 'packages', package_name], timeout=10)
-            if result and package_name in result.stdout:
-                return True
-            return False
-        except Exception as e:
-            print(f"   ❌ Error in _verify_app_installed: {e}")
-            return False
+    def _print_installation_summary(self, success, start_time):
+        """Prints installation summary after verification"""
+        duration = int(time.time() - start_time)
+        print("\n============================================================")
+        print("INSTALLATION SUMMARY")
+        print("============================================================")
+        print(f"Installation Result: {'SUCCESS' if success else 'FAILED'}")
+        print(f"Duration: {duration} seconds")
+        print("============================================================\n")
