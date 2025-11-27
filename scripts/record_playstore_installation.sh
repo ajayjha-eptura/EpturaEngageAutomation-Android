@@ -38,6 +38,16 @@ if ! command -v python3 &> /dev/null; then
     PYTHON_CMD="python"
 fi
 
+# Install Python dependencies
+if command -v pip3 &> /dev/null; then
+    pip3 install -r src/main/resources/requirements.txt
+elif command -v pip &> /dev/null; then
+    pip install -r src/main/resources/requirements.txt
+else
+    echo "ERROR: pip not found. Please install pip for Python."
+    exit 1
+fi
+
 echo "Step 3: Invoking Python installation script..."
 INSTALL_START_TIME=$(date +%s)
 $PYTHON_CMD -u src/main/resources/install_from_playstore.py "$GOOGLE_EMAIL" "$GOOGLE_PASSWORD" "$APP_PACKAGE"
