@@ -494,10 +494,20 @@ stages:
               # Make script executable
               chmod +x scripts/record_playstore_installation.sh
 
+              # --- VENV SETUP FOR PYTHON ---
+              VENV_DIR="venv_playstore"
+              python3 -m venv "$VENV_DIR"
+              source "$VENV_DIR/bin/activate"
+              pip install --upgrade pip
+              pip install -r src/main/resources/requirements.txt
+
               # Run installation (screenshots only, no video recording)
-              ./scripts/record_playstore_installation.sh "$GOOGLE_EMAIL" "$GOOGLE_PASSWORD" "Eptura Engage"
+              ./scripts/record_playstore_installation.sh "$GOOGLE_EMAIL" "$GOOGLE_PASSWORD" "Eptura Engage" "$VENV_DIR"
               INSTALL_RESULT=$?
-              
+
+              # Deactivate venv
+              deactivate
+
               echo ""
               echo "════════════════════════════════════════════════════════════════════"
               
