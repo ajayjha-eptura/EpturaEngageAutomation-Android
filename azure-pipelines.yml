@@ -519,8 +519,7 @@ stages:
                 echo "════════════════════════════════════════════════════════════════════"
                 exit 1
               fi
-            displayName: 'Install Eptura Engage App'
-            continueOnError: true
+            displayName: 'Install Eptura Engage App (with venv)'
             env:
               GOOGLE_EMAIL: $(GOOGLE_PLAY_EMAIL)
               GOOGLE_PASSWORD: $(GOOGLE_PLAY_PASSWORD)
