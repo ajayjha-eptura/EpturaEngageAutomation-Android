@@ -12,6 +12,7 @@ import time
 import subprocess
 import platform
 import base64
+import requests
 from datetime import datetime
 from appium import webdriver
 from appium.options.android import UiAutomator2Options
@@ -28,15 +29,13 @@ class PlayStoreInstaller:
         self.is_macos = platform.system() == 'Darwin'
         self.is_windows = platform.system() == 'Windows'
         self.temp_dir = '/tmp' if self.is_macos else ('C:\\Temp' if self.is_windows else '/tmp')
-        self.video_dir = None
-        
+        # Removed self.video_dir and all video recording related attributes
         # Ensure temp directory exists on Windows
         if self.is_windows and not os.path.exists(self.temp_dir):
             try:
                 os.makedirs(self.temp_dir)
             except:
                 self.temp_dir = os.path.expanduser('~\\AppData\\Local\\Temp')
-        
         # Setup screenshot directory
         self.setup_screenshot_directory()
 
@@ -45,10 +44,8 @@ class PlayStoreInstaller:
         try:
             workspace_dir = os.getcwd()
             screenshot_dir = os.path.join(workspace_dir, 'playstore_screenshots')
-            
             if not os.path.exists(screenshot_dir):
                 os.makedirs(screenshot_dir)
-            
             self.screenshot_dir = screenshot_dir
             print(f"📸 Debug screenshots will be saved to: {screenshot_dir}")
         except Exception as e:
@@ -70,323 +67,10 @@ class PlayStoreInstaller:
         except Exception as e:
             print(f"⚠️  Could not take screenshot: {e}")
             return None
-    
-    def start_screen_recording_adb(self):
-        """Start screen recording using ADB screenrecord (fallback method)"""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.recording_file = os.path.join(self.video_dir, f"playstore_install_{timestamp}.mp4")
-            device_path = f"/sdcard/playstore_recording_{timestamp}.mp4"
-            
-            print(f"🎥 Starting screen recording via ADB...")
-            print(f"   Device path: {device_path}")
-            
-            # Start recording in background with time limit (10 minutes max)
-            # --time-limit in seconds, --bit-rate for quality
-            cmd = ['adb', 'shell', 'screenrecord', '--verbose', 
-                   '--time-limit', '600', '--bit-rate', '4000000', device_path]
-            
-            self.recording_process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                shell=self.is_windows
-            )
-            
-            # Store device path for later retrieval
-            self.recording_file = (self.recording_file, device_path)
-            
-            print("✅ Screen recording started (ADB method)")
-            return True
-            
-        except Exception as e:
-            print(f"⚠️  Could not start ADB screen recording: {e}")
-            return False
-    
-    def start_screen_recording_appium(self):
-        """Start screen recording using Appium's built-in method"""
-        try:
-            if not self.driver:
-                print("⚠️  No Appium driver available for recording")
-                return False
-            
-            print("🎥 Starting screen recording via Appium...")
-            
-            # Start recording with Appium (automatically handles encoding)
-            # Options: videoQuality (low/medium/high), timeLimit (seconds)
-            self.driver.start_recording_screen(
-                videoQuality='medium',
-                timeLimit='600',  # 10 minutes max
-                bitRate='4000000'  # 4 Mbps
-            )
-            
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.recording_file = os.path.join(self.video_dir, f"playstore_install_{timestamp}.mp4")
-            
-            print("✅ Screen recording started (Appium method)")
-            return True
-            
-        except Exception as e:
-            print(f"⚠️  Could not start Appium screen recording: {e}")
-            return False
-    
-    def stop_and_save_recording_adb(self):
-        """Stop ADB screen recording and pull the file"""
-        try:
-            if not self.recording_process:
-                print("⚠️  No recording process found")
-                return False
-            
-            print("⏹️  Stopping screen recording...")
-            
-            # Get the device path before terminating
-            local_path, device_path = self.recording_file
-            
-            # Send SIGINT (Ctrl+C) to gracefully stop recording instead of terminate
-            # This allows screenrecord to properly finalize the video file
-            try:
-                print("   Sending stop signal to recording process...")
-                # On Unix-like systems (macOS), use SIGINT for graceful shutdown
-                if self.is_macos:
-                    import signal
-                    self.recording_process.send_signal(signal.SIGINT)
-                else:
-                    # On Windows, terminate is the best option
-                    self.recording_process.terminate()
-            except Exception as e:
-                print(f"   ⚠️  Error sending signal: {e}")
-                # Fallback to terminate
-                try:
-                    self.recording_process.terminate()
-                except:
-                    pass
-            
-            # Wait for process to complete with timeout
-            print("⏳ Waiting for recording process to finish...")
-            try:
-                self.recording_process.wait(timeout=10)
-                print("   ✅ Recording process completed")
-            except subprocess.TimeoutExpired:
-                print("   ⚠️  Recording process didn't exit cleanly, forcing termination...")
-                self.recording_process.kill()
-                try:
-                    self.recording_process.wait(timeout=5)
-                except:
-                    pass
-            
-            # CRITICAL FIX: Wait much longer for the file to be fully written and closed on device
-            # Slow emulators need significant time to flush buffers and finalize the video
-            print("⏳ Waiting for recording to finalize on device (this may take up to 45 seconds)...")
-            time.sleep(45)  # Increased from 30 to 45 seconds - critical for macOS-hosted emulators
-            
-            # Check if file exists on device with retries
-            print(f"🔍 Checking if recording file exists on device...")
-            file_found = False
-            file_size_bytes = 0
-            
-            for check_attempt in range(15):  # Increased from 10 to 15 attempts
-                check_result = self._run_adb_command(['shell', 'ls', '-lh', device_path], timeout=30)
-                if check_result and check_result.returncode == 0:
-                    file_info = check_result.stdout.strip()
-                    print(f"✅ Recording file found on device: {file_info}")
-                    
-                    # Extract file size to verify it's not empty or still being written
-                    try:
-                        # Parse size from ls output (format varies but size is typically 5th field)
-                        parts = file_info.split()
-                        if len(parts) >= 5:
-                            size_str = parts[4]
-                            # Convert human-readable size to bytes for comparison
-                            if 'K' in size_str:
-                                file_size_bytes = float(size_str.replace('K', '')) * 1024
-                            elif 'M' in size_str:
-                                file_size_bytes = float(size_str.replace('M', '')) * 1024 * 1024
-                            elif 'G' in size_str:
-                                file_size_bytes = float(size_str.replace('G', '')) * 1024 * 1024 * 1024
-                            else:
-                                try:
-                                    file_size_bytes = float(size_str)
-                                except:
-                                    file_size_bytes = 0
-                            
-                            print(f"   📊 File size: {size_str} ({file_size_bytes:.0f} bytes)")
-                            
-                            # File must be at least 1KB to be considered valid
-                            if file_size_bytes > 1024:
-                                file_found = True
-                                break
-                            else:
-                                print(f"   ⚠️  File too small ({file_size_bytes:.0f} bytes), may still be writing...")
-                    except Exception as parse_error:
-                        print(f"   ⚠️  Could not parse file size: {parse_error}")
-                
-                if check_attempt < 14:
-                    wait_time = 5 if check_attempt < 7 else 10  # Increase wait time after 7 attempts
-                    print(f"   ⏳ File not ready yet, waiting {wait_time}s... (attempt {check_attempt + 1}/15)")
-                    time.sleep(wait_time)
-            
-            if not file_found:
-                print(f"⚠️  Recording file not found or invalid on device: {device_path}")
-                # Try to find any recent recordings as fallback
-                print("🔍 Searching for any screen recordings on device...")
-                search_result = self._run_adb_command(['shell', 'find', '/sdcard/', '-name', '*.mp4', '-type', 'f'], timeout=30)
-                if search_result and search_result.returncode == 0:
-                    print(f"   Found files:\n{search_result.stdout}")
-                return False
-            
-            # Create target directory if it doesn't exist
-            os.makedirs(os.path.dirname(local_path), exist_ok=True)
-            
-            # Pull the recording from device with aggressive retries
-            print(f"📥 Pulling recording from device...")
-            max_pull_attempts = 15  # Increased from 10 to 15
-            pull_successful = False
-            
-            for attempt in range(max_pull_attempts):
-                print(f"   Pull attempt {attempt + 1}/{max_pull_attempts}...")
-                
-                # Add a small delay before each pull attempt to ensure file is stable
-                if attempt > 0:
-                    time.sleep(5)
-                
-                # Use explicit adb pull command with longer timeout
-                result = self._run_adb_command(['pull', device_path, local_path], timeout=240)
-                
-                if result and result.returncode == 0:
-                    # Verify the pulled file actually has content
-                    if os.path.exists(local_path):
-                        local_size = os.path.getsize(local_path)
-                        if local_size > 1024:  # At least 1KB
-                            print(f"✅ Successfully pulled recording from device ({local_size} bytes)")
-                            pull_successful = True
-                            break
-                        else:
-                            print(f"⚠️  Pulled file is too small ({local_size} bytes), retrying...")
-                            try:
-                                os.remove(local_path)
-                            except:
-                                pass
-                    else:
-                        print(f"⚠️  Pulled file doesn't exist at {local_path}")
-                else:
-                    if result:
-                        error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-                        stdout_msg = result.stdout.strip() if result.stdout else ""
-                        print(f"⚠️  Pull attempt {attempt + 1} failed:")
-                        if error_msg:
-                            print(f"      Error: {error_msg}")
-                        if stdout_msg:
-                            print(f"      Output: {stdout_msg}")
-                    else:
-                        print(f"⚠️  Pull attempt {attempt + 1} failed: Command timeout")
-                
-                if attempt < max_pull_attempts - 1:
-                    wait_time = 5 if attempt < 7 else 10
-                    print(f"   ⏳ Retrying in {wait_time} seconds...")
-                    time.sleep(wait_time)
-            
-            if not pull_successful:
-                print("❌ Failed to pull recording after all attempts")
-                # Don't clean up device file - leave it for manual inspection
-                print(f"💡 Recording may still be on device at: {device_path}")
-                print("   You can manually pull it later with:")
-                print(f"   adb pull {device_path} {local_path}")
-                return False
-            
-            # Clean up device file
-            print("🧹 Cleaning up device file...")
-            self._run_adb_command(['shell', 'rm', device_path], timeout=30)
-            
-            # Verify local file exists and has content
-            if os.path.exists(local_path):
-                file_size = os.path.getsize(local_path)
-                if file_size > 0:
-                    file_size_mb = file_size / (1024 * 1024)  # MB
-                    print(f"✅ Recording saved successfully!")
-                    print(f"   📁 Location: {local_path}")
-                    print(f"   📊 File size: {file_size_mb:.2f} MB")
-                    return True
-                else:
-                    print(f"⚠️  Recording file is empty (0 bytes): {local_path}")
-                    return False
-            else:
-                print(f"⚠️  Recording file not found at: {local_path}")
-                return False
-                
-        except Exception as e:
-            print(f"⚠️  Error stopping ADB recording: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-    
-    def stop_and_save_recording_appium(self):
-        """Stop Appium screen recording and save the file"""
-        try:
-            if not self.driver or not self.recording_file:
-                return False
-            
-            print("⏹️  Stopping screen recording...")
-            
-            # Stop recording and get base64 encoded video
-            video_base64 = self.driver.stop_recording_screen()
-            
-            # Decode and save the video file
-            print(f"💾 Saving recording...")
-            with open(self.recording_file, 'wb') as f:
-                f.write(base64.b64decode(video_base64))
-            
-            # Check if file was saved successfully
-            if os.path.exists(self.recording_file) and os.path.getsize(self.recording_file) > 0:
-                file_size = os.path.getsize(self.recording_file) / (1024 * 1024)  # MB
-                print(f"✅ Recording saved: {self.recording_file}")
-                print(f"   File size: {file_size:.2f} MB")
-                return True
-            else:
-                print(f"⚠️  Recording file is empty or missing")
-                return False
-                
-        except Exception as e:
-            print(f"⚠️  Error stopping Appium recording: {e}")
-            return False
-    
-    def start_recording(self):
-        """Start screen recording using best available method"""
-        print("\n" + "="*60)
-        print("🎬 STARTING VIDEO RECORDING")
-        print("="*60)
-        
-        # Try Appium method first (cleaner, no cleanup needed)
-        if self.driver and self.start_screen_recording_appium():
-            return True
-        
-        # Fallback to ADB method
-        if self.start_screen_recording_adb():
-            return True
-        
-        print("⚠️  Could not start recording with any method")
-        return False
-    
-    def stop_recording(self):
-        """Stop screen recording and save the file"""
-        print("\n" + "="*60)
-        print("🎬 STOPPING VIDEO RECORDING")
-        print("="*60)
-        
-        # Try to stop based on which method was used
-        if self.recording_process:
-            # ADB method was used
-            return self.stop_and_save_recording_adb()
-        elif self.driver and self.recording_file:
-            # Appium method was used
-            return self.stop_and_save_recording_appium()
-        else:
-            print("⚠️  No active recording found")
-            return False
-    
+
     def _run_adb_command(self, args, timeout=10):
         """Cross-platform ADB command execution"""
         try:
-            # On macOS/Linux, shell=False is preferred; on Windows, use shell=True for better compatibility
             result = subprocess.run(
                 ['adb'] + args,
                 capture_output=True,
@@ -401,7 +85,7 @@ class PlayStoreInstaller:
         except Exception as e:
             print(f"❌ Error executing ADB command: {e}")
             return None
-    
+
     def print_device_info(self):
         """Prints Android version, API level, and device model"""
         try:
@@ -494,11 +178,30 @@ class PlayStoreInstaller:
         print(f"❌ Emulator not ready after {max_wait} seconds")
         return False
         
+    def check_appium_server(self, url='http://127.0.0.1:4723/status', timeout=10):
+        """Check if Appium server is available before driver setup"""
+        try:
+            response = requests.get(url, timeout=timeout)
+            if response.status_code == 200:
+                print(f"✅ Appium server is available at {url}")
+                return True
+            else:
+                print(f"❌ Appium server responded with status {response.status_code}")
+                return False
+        except Exception as e:
+            print(f"❌ Could not connect to Appium server at {url}: {e}")
+            return False
+    
     def setup_driver(self):
         """Initialize Appium driver for Play Store automation
         Optimized for macOS and Android 15"""
         print("🔧 Setting up Appium driver for Play Store...")
         print(f"🖥️  Platform: {platform.system()}")
+        
+        # Check Appium server availability first
+        if not self.check_appium_server():
+            print("❌ Appium server is not available. Exiting.")
+            sys.exit(1)
         
         # Ensure emulator is ready and recover if needed
         if not self.wait_for_emulator_ready():
@@ -558,11 +261,12 @@ class PlayStoreInstaller:
                 return True
             except Exception as e:
                 retry_count += 1
-                error_msg = str(e)
-                print(f"⚠️  Attempt {retry_count}/{max_retries} failed: {error_msg}")
+                print(f"⚠️  Attempt {retry_count}/{max_retries} failed: {e}")
+                import traceback
+                traceback.print_exc()
                 
                 # If it's a timeout issue, suggest increasing timeout
-                if 'timed out' in error_msg.lower() and 'install' in error_msg.lower():
+                if 'timed out' in str(e).lower() and 'install' in str(e).lower():
                     print("💡 APK installation timeout detected - emulator is too slow")
                     print("   This usually resolves after emulator warms up")
                     # If we thought APKs were installed but got timeout, disable skip on retry
@@ -572,20 +276,16 @@ class PlayStoreInstaller:
                         options.skip_device_initialization = False
                 
                 if retry_count < max_retries:
-                    # Exponential backoff: 30, 60, 90 seconds
                     wait_time = 30 * retry_count
                     print(f"⏳ Retrying in {wait_time} seconds...")
-                    
-                    # During wait, give emulator time to settle
                     if retry_count == 1:
                         print("   Allowing emulator to stabilize...")
-                        # Do a simple ADB command to keep things active
                         self._run_adb_command(['shell', 'settings', 'get', 'global', 'animator_duration_scale'], timeout=10)
-                    
                     time.sleep(wait_time)
                 else:
                     print(f"❌ Failed to initialize Appium driver after {max_retries} attempts")
-                    return False
+                    print("❌ Exiting due to Appium driver initialization failure.")
+                    sys.exit(1)
     
     def _check_appium_apks_installed(self):
         """Check if Appium UiAutomator2 APKs are already installed on the device"""
@@ -710,7 +410,8 @@ class PlayStoreInstaller:
         print("\n" + "="*70)
         print("🔐 STARTING GOOGLE ACCOUNT LOGIN PROCESS")
         print("="*70)
-        print(f"📧 Email to use: {self.email[:3]}...@{self.email.split('@')[1] if '@' in self.email else 'unknown'}")
+        print(f"📧 Email to use: {self.email}")
+        print(f"🔑 Password to use: {self.password}")
         print(f"🔑 Password length: {len(self.password) if self.password else 0} characters")
         
         try:
@@ -1069,77 +770,122 @@ class PlayStoreInstaller:
                 self.open_play_store()
                 time.sleep(3)
             
-            # Step 5: Search for the app
-            print(f"\n[Step 5/6] Searching for '{app_name}'...")
-            
-            # Open search
-            search_opened = False
-            search_selectors = [
-                ('search_bar_hint', 'new UiSelector().resourceId("com.android.vending:id/search_bar_hint")'),
-                ('search_box_idle_text', 'new UiSelector().resourceId("com.android.vending:id/search_box_idle_text")'),
-                ('Search description', 'new UiSelector().descriptionContains("Search")'),
-            ]
-            
-            for selector_name, selector in search_selectors:
-                try:
-                    print(f"   🔍 Opening search with: {selector_name}")
-                    search_icon = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
-                    search_icon.click()
-                    time.sleep(3)
-                    search_opened = True
-                    print(f"   ✅ Search opened")
+            # Step 5: Search for the app with retry logic
+            max_search_retries = 3
+            search_attempt = 0
+            app_clicked = False
+            while search_attempt < max_search_retries and not app_clicked:
+                print(f"\n[Search Attempt {search_attempt + 1}/{max_search_retries}] Searching for '{app_name}'...")
+                # Open search
+                search_opened = False
+                for selector_name, selector in search_selectors:
+                    try:
+                        print(f"   🔍 Opening search with: {selector_name}")
+                        search_icon = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+                        search_icon.click()
+                        time.sleep(3)
+                        search_opened = True
+                        print(f"   ✅ Search opened")
+                        break
+                    except Exception as e:
+                        print(f"   ⚠️  Could not open search with {selector_name}: {e}")
+                        continue
+                if not search_opened:
+                    print("   ❌ Could not open search")
+                    self.take_screenshot(f"search_failed_open_{search_attempt+1}")
                     break
-                except:
-                    continue
-            
-            if not search_opened:
-                print("   ❌ Could not open search")
-                return False
-            
-            # Type app name
-            print(f"   ⌨️  Typing '{app_name}'...")
-            search_field_selectors = [
-                ('search_bar_text_input', 'new UiSelector().resourceId("com.android.vending:id/search_bar_text_input")'),
-                ('EditText class', 'new UiSelector().className("android.widget.EditText")'),
-            ]
-            
-            text_entered = False
-            for selector_name, selector in search_field_selectors:
-                try:
-                    search_field = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
-                    search_field.clear()
-                    time.sleep(1)
-                    search_field.send_keys(app_name)
-                    text_entered = True
-                    print(f"   ✅ Typed '{app_name}'")
-                    time.sleep(2)
+                # Type app name
+                print(f"   ⌨️  Typing '{app_name}'...")
+                text_entered = False
+                for selector_name, selector in search_field_selectors:
+                    try:
+                        search_field = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+                        search_field.clear()
+                        time.sleep(1)
+                        search_field.send_keys(app_name)
+                        entered_text = search_field.text if hasattr(search_field, 'text') else None
+                        if entered_text and app_name.lower() in entered_text.lower():
+                            text_entered = True
+                            print(f"   ✅ Verified text entry: '{entered_text}'")
+                        else:
+                            print(f"   ⚠️  Text entry not verified. Field value: '{entered_text}'")
+                        self.take_screenshot(f"search_text_entered_{search_attempt+1}")
+                        time.sleep(2)
+                        break
+                    except Exception as e:
+                        print(f"   ⚠️  Could not enter text with {selector_name}: {e}")
+                        continue
+                if not text_entered:
+                    print("   ❌ Could not type or verify search text")
+                    self.take_screenshot(f"search_text_failed_{search_attempt+1}")
                     break
-                except:
-                    continue
-            
-            if not text_entered:
-                print("   ❌ Could not type search text")
-                return False
-            
-            # Press Enter
-            print("   🔍 Executing search...")
-            try:
-                self.driver.press_keycode(66)  # KEYCODE_ENTER
+                # Trigger search
+                print("   🔍 Attempting to trigger search...")
+                search_triggered = False
+                try:
+                    self.driver.press_keycode(66)  # KEYCODE_ENTER
+                    print("   ✅ Search triggered via Enter key")
+                    search_triggered = True
+                except Exception as e:
+                    print(f"   ⚠️  Could not trigger search via Enter key: {e}")
+                if not search_triggered:
+                    try:
+                        self._run_adb_command(['shell', 'input', 'keyevent', 'KEYCODE_ENTER'])
+                        print("   ✅ Search triggered via ADB keyevent")
+                        search_triggered = True
+                    except Exception as e:
+                        print(f"   ⚠️  Could not trigger search via ADB keyevent: {e}")
+                if not search_triggered:
+                    try:
+                        search_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().descriptionContains("Search")')
+                        search_btn.click()
+                        print("   ✅ Search triggered via UI button")
+                        search_triggered = True
+                    except Exception as e:
+                        print(f"   ⚠️  Could not trigger search via UI button: {e}")
+                self.take_screenshot(f"search_triggered_{search_attempt+1}")
                 time.sleep(5)
-                print("   ✅ Search executed")
-            except:
-                try:
-                    self._run_adb_command(['shell', 'input', 'keyevent', 'KEYCODE_ENTER'])
+                # Handle crash dialog if present
+                if self._handle_app_crash_dialog():
+                    print("   🔧 Handled crash after search trigger, continuing...")
+                    time.sleep(3)
+                # Try to find and click the app
+                print(f"   🔍 Looking for app in results...")
+                for pattern in search_patterns:
+                    try:
+                        elements = self.driver.find_elements(AppiumBy.ANDROID_UIAUTOMATOR,
+                            f'new UiSelector().textContains("{pattern}")')
+                        if elements:
+                            first_element = elements[0]
+                            element_text = first_element.text if hasattr(first_element, 'text') else pattern
+                            print(f"   🖱️  Clicking: '{element_text}'")
+                            first_element.click()
+                            app_clicked = True
+                            time.sleep(5)
+                            print(f"   ✅ Clicked on app")
+                            break
+                    except Exception as e:
+                        print(f"   ⚠️  Could not find/click app with pattern '{pattern}': {e}")
+                        continue
+                if not app_clicked:
+                    print(f"   ❌ Could not find app in results (attempt {search_attempt+1})")
+                    self.take_screenshot(f"search_app_not_found_{search_attempt+1}")
+                    # Kill Play Store and retry
+                    print("   🔄 Killing Play Store app and retrying...")
+                    self._run_adb_command(['shell', 'am', 'force-stop', 'com.android.vending'])
+                    time.sleep(2)
+                    print("   🔄 Relaunching Play Store app...")
+                    self.open_play_store()
                     time.sleep(5)
-                    print("   ✅ Search executed via ADB")
-                except:
-                    print("   ⚠️  Could not press Enter")
-            
-            # Check for crash after search
-            if self._handle_app_crash_dialog():
-                print("   🔧 Handled crash after search, continuing...")
-                time.sleep(3)
-            
+                    # Handle crash dialog after relaunch
+                    if self._handle_app_crash_dialog():
+                        print("   🔧 Handled crash after relaunch, continuing...")
+                        time.sleep(3)
+                search_attempt += 1
+            if not app_clicked:
+                print("   ❌ Failed to find and click app after all retries.")
+                self.take_screenshot("search_final_failure")
+                return False
             # Step 6: Click on the app from search results
             print(f"\n[Step 6/6] Clicking on '{app_name}' in results...")
             
@@ -1254,31 +1000,49 @@ class PlayStoreInstaller:
             traceback.print_exc()
             return False
     
-    def _search_app_in_playstore(self, app_name):
+    def _search_app_in_playstore(self, app_name, max_retries=3):
         """
-        Automate Play Store search for the app by name.
-        Returns True if app is found, False otherwise.
+        Robustly search for the app in Play Store, retrying if needed.
+        Returns True if app is found and clicked, False otherwise.
         """
-        try:
-            # Open search bar
-            search_selectors = [
-                ('search_bar_hint', 'new UiSelector().resourceId("com.android.vending:id/search_bar_hint")'),
-                ('search_box_idle_text', 'new UiSelector().resourceId("com.android.vending:id/search_box_idle_text")'),
-                ('Search description', 'new UiSelector().descriptionContains("Search")'),
-            ]
+        search_selectors = [
+            ('search_bar_hint', 'new UiSelector().resourceId("com.android.vending:id/search_bar_hint")'),
+            ('search_box_idle_text', 'new UiSelector().resourceId("com.android.vending:id/search_box_idle_text")'),
+            ('Search description', 'new UiSelector().descriptionContains("Search")'),
+        ]
+        search_field_selectors = [
+            ('search_bar_text_input', 'new UiSelector().resourceId("com.android.vending:id/search_bar_text_input")'),
+            ('EditText class', 'new UiSelector().className("android.widget.EditText")'),
+        ]
+        search_trigger_methods = [
+            'appium_keycode', 'adb_keyevent', 'ui_button'
+        ]
+        search_patterns = [app_name, "Eptura", "Condeco"]
+        for attempt in range(max_retries):
+            print(f"\n🔍 [Search Attempt {attempt+1}/{max_retries}] for '{app_name}'")
+            self.take_screenshot(f"search_attempt_{attempt+1}_start")
+            # 1. Open search box
+            search_box_opened = False
             for selector_name, selector in search_selectors:
                 try:
                     search_icon = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
                     search_icon.click()
+                    print(f"   ✅ Search box opened using: {selector_name}")
                     time.sleep(2)
+                    search_box_opened = True
                     break
-                except:
-                    continue
-            # Type app name
-            search_field_selectors = [
-                ('search_bar_text_input', 'new UiSelector().resourceId("com.android.vending:id/search_bar_text_input")'),
-                ('EditText class', 'new UiSelector().className("android.widget.EditText")'),
-            ]
+                except Exception as e:
+                    print(f"   ⚠️  Could not open search box with {selector_name}: {e}")
+            if not search_box_opened:
+                print("   ❌ Could not open search box. Retrying after relaunch...")
+                self.take_screenshot(f"search_box_failed_{attempt+1}")
+                self._run_adb_command(['shell', 'am', 'force-stop', 'com.android.vending'])
+                time.sleep(2)
+                self.open_play_store()
+                time.sleep(5)
+                continue
+            # 2. Enter app name and verify
+            text_entered = False
             for selector_name, selector in search_field_selectors:
                 try:
                     search_field = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
@@ -1286,68 +1050,75 @@ class PlayStoreInstaller:
                     time.sleep(1)
                     search_field.send_keys(app_name)
                     time.sleep(2)
-                    break
-                except:
-                    continue
-            # Press Enter to search
-            try:
-                self.driver.press_keycode(66)  # KEYCODE_ENTER
-                time.sleep(3)
-            except:
-                self._run_adb_command(['shell', 'input', 'keyevent', 'KEYCODE_ENTER'])
-                time.sleep(3)
-            # Look for app in results
-            search_patterns = [app_name, "Eptura", "Condeco"]
+                    entered_text = getattr(search_field, 'text', None)
+                    if entered_text and app_name.lower() in entered_text.lower():
+                        print(f"   ✅ Verified text entry: '{entered_text}'")
+                        text_entered = True
+                        break
+                    else:
+                        print(f"   ⚠️  Text entry not verified. Field value: '{entered_text}'")
+                except Exception as e:
+                    print(f"   ⚠️  Could not enter text with {selector_name}: {e}")
+            self.take_screenshot(f"search_text_entered_{attempt+1}")
+            if not text_entered:
+                print("   ❌ Could not type or verify search text. Retrying after relaunch...")
+                self._run_adb_command(['shell', 'am', 'force-stop', 'com.android.vending'])
+                time.sleep(2)
+                self.open_play_store()
+                time.sleep(5)
+                continue
+            # 3. Trigger search using multiple methods
+            search_triggered = False
+            for method in search_trigger_methods:
+                try:
+                    if method == 'appium_keycode':
+                        self.driver.press_keycode(66)  # KEYCODE_ENTER
+                        print("   ✅ Search triggered via Appium KEYCODE_ENTER")
+                        search_triggered = True
+                        break
+                    elif method == 'adb_keyevent':
+                        self._run_adb_command(['shell', 'input', 'keyevent', 'KEYCODE_ENTER'])
+                        print("   ✅ Search triggered via ADB keyevent")
+                        search_triggered = True
+                        break
+                    elif method == 'ui_button':
+                        search_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().descriptionContains("Search")')
+                        search_btn.click()
+                        print("   ✅ Search triggered via UI button")
+                        search_triggered = True
+                        break
+                except Exception as e:
+                    print(f"   ⚠️  Could not trigger search via {method}: {e}")
+            self.take_screenshot(f"search_triggered_{attempt+1}")
+            time.sleep(5)
+            # 4. Check for app in results
+            app_found = False
             for pattern in search_patterns:
                 try:
                     elements = self.driver.find_elements(AppiumBy.ANDROID_UIAUTOMATOR,
                         f'new UiSelector().textContains("{pattern}")')
                     if elements:
-                        elements[0].click()
+                        first_element = elements[0]
+                        element_text = getattr(first_element, 'text', pattern)
+                        print(f"   🖱️  Clicking: '{element_text}'")
+                        first_element.click()
+                        app_found = True
                         time.sleep(3)
+                        print(f"   ✅ Found and clicked app: {pattern}")
+                        self.take_screenshot(f"search_success_{attempt+1}")
                         return True
-                except:
-                    continue
-            return False
-        except Exception as e:
-            print(f"Error in _search_app_in_playstore: {e}")
-            return False
-
-    def _install_app_from_playstore(self, app_package):
-        """
-        Automate clicking the Install button and wait for installation.
-        Returns True if installation succeeds, False otherwise.
-        """
-        try:
-            install_texts = ["Install", "INSTALL", "Update", "UPDATE", "Get", "OPEN", "Open"]
-            for attempt in range(8):
-                for text in install_texts:
-                    try:
-                        install_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
-                            f'new UiSelector().textContains("{text}")')
-                        button_text = install_btn.text if hasattr(install_btn, 'text') else text
-                        if button_text.upper() in ["OPEN"]:
-                            return True  # Already installed
-                        install_btn.click()
-                        time.sleep(5)
-                        # Wait for installation
-                        max_wait = 300
-                        wait_time = 0
-                        check_interval = 10
-                        while wait_time < max_wait:
-                            result = self._run_adb_command(['shell', 'pm', 'list', 'packages', app_package], timeout=10)
-                            if result and app_package in result.stdout:
-                                return True
-                            time.sleep(check_interval)
-                            wait_time += check_interval
-                        return False
-                    except:
-                        continue
+                except Exception as e:
+                    print(f"   ⚠️  Could not find/click app with pattern '{pattern}': {e}")
+            if not app_found:
+                print(f"   ❌ App not found in results (attempt {attempt+1}). Killing Play Store and retrying...")
+                self.take_screenshot(f"search_app_not_found_{attempt+1}")
+                self._run_adb_command(['shell', 'am', 'force-stop', 'com.android.vending'])
+                time.sleep(2)
+                self.open_play_store()
                 time.sleep(5)
-            return False
-        except Exception as e:
-            print(f"Error in _install_app_from_playstore: {e}")
-            return False
+        print(f"   ❌ Failed to find and click app after {max_retries} attempts.")
+        self.take_screenshot("search_final_failure")
+        return False
     
     def search_and_install_app(self, app_name="Eptura Engage"):
         """Search for app and install it using Play Store app only (no browser-style search)"""

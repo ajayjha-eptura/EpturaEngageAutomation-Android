@@ -48,9 +48,6 @@ INSTALL_DURATION=$((INSTALL_END_TIME - INSTALL_START_TIME))
 echo ""
 echo "============================================================"
 echo "INSTALLATION SUMMARY"
+echo "Result: $INSTALL_RESULT"
+echo "Duration: $INSTALL_DURATION seconds"
 echo "============================================================"
-echo "Installation Result: $([ $INSTALL_RESULT -eq 0 ] && echo 'SUCCESS' || echo 'FAILED')"
-echo "Duration: ${INSTALL_DURATION} seconds"
-echo "============================================================"
-
-exit $INSTALL_RESULT
