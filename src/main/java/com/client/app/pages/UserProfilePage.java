@@ -3,7 +3,6 @@ package com.client.app.pages;
 import appium.webdriver.extensions.DriverFactory;
 import appium.webdriver.extensions.Utility;
 import org.openqa.selenium.By;
-import org.testng.Assert;
 
 public class UserProfilePage extends DriverFactory {
 
@@ -80,7 +79,9 @@ public class UserProfilePage extends DriverFactory {
 			System.out.println("Verifying location match...");
 			System.out.println("Default Location: " + defaultLocation);
 			System.out.println("Actual Location: " + actualLocation);
-			Assert.assertEquals(defaultLocation, actualLocation, "Location names do not match");
+			if (!defaultLocation.equals(actualLocation)) {
+				throw new AssertionError("Location names do not match: expected [" + defaultLocation + "] but was [" + actualLocation + "]");
+			}
 			System.out.println("✅ Location names matched successfully: " + defaultLocation + " == " + actualLocation);
 			System.out.println("✅ Building name verified at the top of floor overlay");
 		} catch (Exception e) {
@@ -126,7 +127,9 @@ public class UserProfilePage extends DriverFactory {
 			Thread.sleep(1000);
 			String updatedValue = Utility.getTextFromid(defaultCountryField_id, 10);
 			System.out.println("Updated value: " + updatedValue);
-			Assert.assertEquals(topCountryValue, updatedValue, "Saved value does not match expected value");
+			if (!topCountryValue.equals(updatedValue)) {
+				throw new AssertionError("Saved value does not match expected value: expected [" + topCountryValue + "] but was [" + updatedValue + "]");
+			}
 			System.out.println("✅ Changed value successfully updated");
 		} catch (Exception e) {
 			System.out.println("❌ Error validating saved value: " + e.getMessage());
@@ -155,7 +158,9 @@ public class UserProfilePage extends DriverFactory {
 			System.out.println("Popup message: " + actualMsg);
 			Utility.clickElement(logoutCancelButton_id, 10);
 			Thread.sleep(1000);
-			Assert.assertEquals(expectedLogoutPopupMsg, actualMsg, "Logout popup message does not match");
+			if (!expectedLogoutPopupMsg.equals(actualMsg)) {
+				throw new AssertionError("Logout popup message does not match: expected [" + expectedLogoutPopupMsg + "] but was [" + actualMsg + "]");
+			}
 			System.out.println("✅ Logout popup verified successfully");
 		} catch (Exception e) {
 			System.out.println("❌ Error verifying logout popup: " + e.getMessage());
@@ -199,7 +204,9 @@ public class UserProfilePage extends DriverFactory {
 			String latestCountry = Utility.getTextFromid(defaultCountry_xpath, 10);
 			System.out.println("Latest country: " + latestCountry);
 			Utility.clickElement(closeButton_id, 10);
-			Assert.assertEquals(defaultCountry, latestCountry, "Country selection changed unexpectedly");
+			if (!defaultCountry.equals(latestCountry)) {
+				throw new AssertionError("Country selection changed unexpectedly: expected [" + defaultCountry + "] but was [" + latestCountry + "]");
+			}
 			System.out.println("✅ Previously selected country not changed");
 		} catch (Exception e) {
 			System.out.println("❌ Error verifying country name: " + e.getMessage());
@@ -428,7 +435,9 @@ public class UserProfilePage extends DriverFactory {
 			String latestGroup = Utility.getTextFromid(defaultGroupSelected_xpath, 10);
 			System.out.println("Latest group: " + latestGroup);
 			Utility.clickElement(closeButton_id, 10);
-			Assert.assertEquals(defaultGroup, latestGroup, "Group selection changed unexpectedly");
+			if (!defaultGroup.equals(latestGroup)) {
+				throw new AssertionError("Group selection changed unexpectedly: expected [" + defaultGroup + "] but was [" + latestGroup + "]");
+			}
 			System.out.println("✅ Previously selected group not changed");
 		} catch (Exception e) {
 			System.out.println("❌ Error verifying group name: " + e.getMessage());
