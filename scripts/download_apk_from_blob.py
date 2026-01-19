@@ -9,6 +9,7 @@ import os
 import sys
 import urllib.request
 import urllib.parse
+import urllib.error
 from datetime import datetime
 
 def download_apk_from_blob():
@@ -70,11 +71,87 @@ def download_apk_from_blob():
         sys.exit(1)
 
 
+def check_blob_exists(storage_account, container_name, blob_name, sas_token):
+    """Check if a blob exists using HEAD request"""
+    sas_token = sas_token.lstrip('?')
+    blob_url = f"https://{storage_account}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
+    
+    try:
+        request = urllib.request.Request(blob_url, method='HEAD')
+        urllib.request.urlopen(request)
+        return True
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return False
+        raise
+
+
+def list_available_blobs(storage_account, container_name, sas_token):
+    """List available blobs in the container to help diagnose issues"""
+    sas_token = sas_token.lstrip('?')
+    
+    # Construct the list blobs URL
+    list_url = f"https://{storage_account}.blob.core.windows.net/{container_name}?restype=container&comp=list&{sas_token}"
+    
+    try:
+        print(f"\n📋 Listing available blobs in container '{container_name}'...")
+        with urllib.request.urlopen(list_url) as response:
+            content = response.read().decode('utf-8')
+            
+            # Parse blob names from XML response
+            import re
+            blob_names = re.findall(r'<Name>(.*?)</Name>', content)
+            
+            if blob_names:
+                print(f"   Found {len(blob_names)} blob(s):")
+                for name in blob_names[:10]:  # Show first 10
+                    print(f"   - {name}")
+                if len(blob_names) > 10:
+                    print(f"   ... and {len(blob_names) - 10} more")
+            else:
+                print(f"   No blobs found in container or unable to parse response")
+                
+            return blob_names
+    except urllib.error.HTTPError as e:
+        print(f"   ⚠️ Unable to list blobs: {e.code} - {e.reason}")
+        print(f"   (This may be due to SAS token permissions - 'list' permission may not be granted)")
+        return []
+    except Exception as e:
+        print(f"   ⚠️ Unable to list blobs: {str(e)}")
+        return []
+
+
 def download_with_sas_token(storage_account, container_name, blob_name, sas_token, local_path):
     """Download APK using SAS Token (no Azure SDK required)"""
     
     # Clean up SAS token (remove leading ? if present)
     sas_token = sas_token.lstrip('?')
+    
+    # Check if blob exists first
+    print(f"🔍 Checking if blob exists...")
+    if not check_blob_exists(storage_account, container_name, blob_name, sas_token):
+        print(f"❌ Error: Blob '{blob_name}' not found in container '{container_name}'")
+        print(f"\n💡 Possible causes:")
+        print(f"   1. The APK file hasn't been uploaded to blob storage yet")
+        print(f"   2. The blob name is incorrect (check for typos or path)")
+        print(f"   3. The container name is incorrect")
+        print(f"   4. The SAS token doesn't have permission to access this blob")
+        
+        # Try to list available blobs to help diagnose
+        available_blobs = list_available_blobs(storage_account, container_name, sas_token)
+        
+        # Suggest similar blob names if found
+        if available_blobs:
+            apk_blobs = [b for b in available_blobs if b.lower().endswith('.apk')]
+            if apk_blobs:
+                print(f"\n💡 Found APK files in container:")
+                for apk in apk_blobs[:5]:
+                    print(f"   - {apk}")
+                print(f"\n   Consider updating APK_BLOB_NAME to one of these values")
+        
+        sys.exit(1)
+    
+    print(f"   ✅ Blob exists!")
     
     # Construct the blob URL with SAS token
     blob_url = f"https://{storage_account}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
@@ -114,6 +191,20 @@ def download_with_storage_key(storage_account, container_name, blob_name, storag
     # Check if blob exists
     if not blob_client.exists():
         print(f"❌ Error: Blob '{blob_name}' not found in container '{container_name}'")
+        
+        # List available blobs
+        print(f"\n📋 Available blobs in container:")
+        container_client = blob_service_client.get_container_client(container_name)
+        blobs = list(container_client.list_blobs())
+        apk_blobs = [b.name for b in blobs if b.name.lower().endswith('.apk')]
+        
+        if apk_blobs:
+            print(f"   Found APK files:")
+            for apk in apk_blobs[:5]:
+                print(f"   - {apk}")
+        else:
+            print(f"   No APK files found in container")
+        
         sys.exit(1)
     
     # Get blob properties

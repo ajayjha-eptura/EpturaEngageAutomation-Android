@@ -31,7 +31,7 @@ variables:
   AZURE_STORAGE_ACCOUNT: 'entstorage'
   AZURE_STORAGE_CONTAINER: 'mobilebuilds'
   # AZURE_SAS_TOKEN: Configure this as a SECRET variable in Azure DevOps Pipeline Variables
-  APK_BLOB_NAME: 'EpturaEngage.apk'
+  APK_BLOB_NAME: 'Engage/Android/EpturaEngage.apk'
   APK_LOCAL_PATH: '$(Build.SourcesDirectory)/app.apk'
 
 stages:
