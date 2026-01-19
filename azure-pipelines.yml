@@ -176,9 +176,25 @@ stages:
 
           - script: |
               set -e
+              echo "📦 Installing Android SDK..."
+              mkdir -p $(ANDROID_HOME)
+              cd $(ANDROID_HOME)
+              wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+              unzip -q commandlinetools-linux-9477386_latest.zip
+              mkdir -p cmdline-tools/latest
+              mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+              export PATH=$(ANDROID_HOME)/cmdline-tools/latest/bin:$(ANDROID_HOME)/platform-tools:$(ANDROID_HOME)/emulator:$PATH
+              yes | sdkmanager --licenses || true
+              sdkmanager "platform-tools" "platforms;android-30" "emulator" "build-tools;30.0.3"
+              echo "✅ Android SDK installed"
+            displayName: 'Install Android SDK'
+
+          - script: |
+              set -e
               echo "🔧 Setting up environment..."
-              export PATH=$(ANDROID_HOME)/platform-tools:$(ANDROID_HOME)/emulator:$PATH
+              export PATH=$(ANDROID_HOME)/cmdline-tools/latest/bin:$(ANDROID_HOME)/platform-tools:$(ANDROID_HOME)/emulator:$PATH
               export ANDROID_HOME=$(ANDROID_HOME)
+              export ANDROID_SDK_ROOT=$(ANDROID_HOME)
               
               # Install Appium
               sudo npm install -g appium@$(APPIUM_VERSION)
@@ -204,4 +220,7 @@ stages:
               javaHomeOption: 'JDKVersion'
               jdkVersionOption: '1.11'
               mavenVersionOption: 'Default'
+            env:
+              ANDROID_HOME: $(ANDROID_HOME)
+              ANDROID_SDK_ROOT: $(ANDROID_HOME)
             continueOnError: true
