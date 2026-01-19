@@ -1,4 +1,7 @@
-package appium.webdriver.extensions;
+#!/usr/bin/env python3
+"""Script to fix the Utility.java file for CI/CD compatibility"""
+
+content = '''package appium.webdriver.extensions;
 import org.openqa.selenium.By;
 import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.TimeoutException;
@@ -102,3 +105,14 @@ public class Utility {
         }
     }
 }
+'''
+
+import os
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_dir = os.path.dirname(script_dir)
+target_file = os.path.join(project_dir, 'src', 'main', 'java', 'appium', 'webdriver', 'extensions', 'Utility.java')
+
+with open(target_file, 'w', encoding='utf-8') as f:
+    f.write(content)
+
+print(f"Successfully fixed: {target_file}")
