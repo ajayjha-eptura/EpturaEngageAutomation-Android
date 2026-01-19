@@ -26,7 +26,7 @@ variables:
   MAVEN_CACHE_FOLDER: $(Pipeline.Workspace)/.m2/repository
   MAVEN_OPTS: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
   ANDROID_HOME: $(Agent.ToolsDirectory)/android-sdk
-  APPIUM_VERSION: '2.19.0'
+  APPIUM_VERSION: '3.0.0'
   # Azure Blob Storage variables
   AZURE_STORAGE_ACCOUNT: 'entstorage'
   AZURE_STORAGE_CONTAINER: 'mobilebuilds'
