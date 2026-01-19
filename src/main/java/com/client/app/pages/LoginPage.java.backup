@@ -280,24 +280,7 @@ public class LoginPage extends DriverFactory {
             System.out.println("✅ Login credentials submitted successfully");
             System.out.println("========================================");
             
-
-            // Wait for page to load after login submission
-            System.out.println("⏳ Waiting for page to load after login...");
-            Thread.sleep(0300); // Initial wait for transition to start
-            
-            // Wait for login screen to disappear (username field should not be visible)
-            WebDriverWait postLoginWait = new WebDriverWait(driver, Duration.ofSeconds(30));
-            try {
-                postLoginWait.until(ExpectedConditions.invisibilityOfElementLocated(Username_id));
-                System.out.println("✅ Login screen disappeared - page is loading");
-            } catch (Exception waitEx) {
-                System.out.println("⚠️ Username field still visible after login submission");
-            }
-            
-            // Additional wait for the home screen to start appearing
-            Thread.sleep(5000); // Allow time for home screen elements to initialize
-            System.out.println("✅ Page load wait completed, ready for notification handling");
-            System.out.println("========================================");
+            Thread.sleep(3000);
             
 		} catch (Exception e) {
 			System.out.println("========================================");
@@ -323,6 +306,8 @@ public class LoginPage extends DriverFactory {
 	public void verify_Valid_Login()
 	
 	{
+		
+		
 		Utility.handleAppNotifications();
 		try {
 			// Wait for successful login - check for username field to disappear or Today page to appear

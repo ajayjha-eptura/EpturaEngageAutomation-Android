@@ -6,6 +6,13 @@ Compatible with macOS and Windows CI/CD environments
 Optimized for Android 15 (API 35)
 """
 
+# ============================================================================
+# CONFIGURATION - SET YOUR GOOGLE CREDENTIALS HERE
+# ============================================================================
+GOOGLE_EMAIL = "epturaengageautomation@gmail.com"  # Replace with your Google email
+GOOGLE_PASSWORD = "Eptura@2025"      # Replace with your Google password
+# ============================================================================
+
 import os
 import sys
 import time
@@ -54,19 +61,8 @@ class PlayStoreInstaller:
 
     def take_screenshot(self, name_prefix="debug"):
         """Take a screenshot and save to screenshot directory"""
-        if not self.driver:
-            print("⚠️  No Appium driver available for screenshot")
-            return None
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{name_prefix}_{timestamp}.png"
-            filepath = os.path.join(self.screenshot_dir, filename)
-            self.driver.save_screenshot(filepath)
-            print(f"📸 Screenshot saved: {filepath}")
-            return filepath
-        except Exception as e:
-            print(f"⚠️  Could not take screenshot: {e}")
-            return None
+        # Screenshot functionality disabled
+        return None
 
     def _run_adb_command(self, args, timeout=10):
         """Cross-platform ADB command execution"""
@@ -718,7 +714,6 @@ class PlayStoreInstaller:
             # Step 1: Check if Play Store is installed
             print("\n[Step 1/6] Checking Google Play Store installation...")
             result = self._run_adb_command(['shell', 'pm', 'list', 'packages', 'com.android.vending'], timeout=10)
-            self.take_screenshot("step1_playstore_check")
             if not result or 'com.android.vending' not in result.stdout:
                 print("   ⚠️  Google Play Store NOT installed")
                 print("   📦 Installing Google Play Store...")
@@ -792,7 +787,6 @@ class PlayStoreInstaller:
                         continue
                 if not search_opened:
                     print("   ❌ Could not open search")
-                    self.take_screenshot(f"search_failed_open_{search_attempt+1}")
                     break
                 # Type app name
                 print(f"   ⌨️  Typing '{app_name}'...")
@@ -809,7 +803,6 @@ class PlayStoreInstaller:
                             print(f"   ✅ Verified text entry: '{entered_text}'")
                         else:
                             print(f"   ⚠️  Text entry not verified. Field value: '{entered_text}'")
-                        self.take_screenshot(f"search_text_entered_{search_attempt+1}")
                         time.sleep(2)
                         break
                     except Exception as e:
@@ -817,7 +810,6 @@ class PlayStoreInstaller:
                         continue
                 if not text_entered:
                     print("   ❌ Could not type or verify search text")
-                    self.take_screenshot(f"search_text_failed_{search_attempt+1}")
                     break
                 # Trigger search
                 print("   🔍 Attempting to trigger search...")
@@ -826,65 +818,70 @@ class PlayStoreInstaller:
                     self.driver.press_keycode(66)  # KEYCODE_ENTER
                     print("   ✅ Search triggered via Enter key")
                     search_triggered = True
+                    time.sleep(2)  # Wait for search results to load
+                    time.sleep(5)
                 except Exception as e:
-                    print(f"   ⚠️  Could not trigger search via Enter key: {e}")
-                if not search_triggered:
+                    print(f"   ⚠️  Could not trigger search via Enter key: {str(e)[:100]}")
+                    # Try ADB method
                     try:
                         self._run_adb_command(['shell', 'input', 'keyevent', 'KEYCODE_ENTER'])
                         print("   ✅ Search triggered via ADB keyevent")
                         search_triggered = True
-                    except Exception as e:
-                        print(f"   ⚠️  Could not trigger search via ADB keyevent: {e}")
-                if not search_triggered:
-                    try:
-                        search_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().descriptionContains("Search")')
-                        search_btn.click()
-                        print("   ✅ Search triggered via UI button")
-                        search_triggered = True
-                    except Exception as e:
-                        print(f"   ⚠️  Could not trigger search via UI button: {e}")
-                self.take_screenshot(f"search_triggered_{search_attempt+1}")
-                time.sleep(5)
-                # Handle crash dialog if present
-                if self._handle_app_crash_dialog():
-                    print("   🔧 Handled crash after search trigger, continuing...")
-                    time.sleep(3)
-                # Try to find and click the app
-                print(f"   🔍 Looking for app in results...")
+                        time.sleep(2)  # Wait for search results to load
+                        time.sleep(5)
+                    except Exception as e2:
+                        print(f"   ⚠️  Could not trigger search via ADB: {str(e2)[:100]}")
+            
+            # Step 5: Look for app in search results using XPath first (most reliable)
+            print(f"   🔍 Looking for app in search results using XPath...")
+            app_found = False
+            
+            # Try XPath first - this is the most reliable method
+            try:
+                print(f"   🔍 Attempting to click app using XPath: {app_result_xpath}")
+                app_element = self.driver.find_element(AppiumBy.XPATH, app_result_xpath)
+                print(f"   🖱️  Clicking app using XPath...")
+                app_element.click()
+                app_found = True
+                time.sleep(3)
+                print(f"   ✅ Found and clicked app via XPath")
+                return True
+            except Exception as e:
+                print(f"   ⚠️  Could not find/click app via XPath: {str(e)[:100]}")
+            
+            # Fallback to text-based patterns if XPath fails
+            if not app_found:
+                print(f"   🔍 Falling back to text-based patterns...")
                 for pattern in search_patterns:
                     try:
                         elements = self.driver.find_elements(AppiumBy.ANDROID_UIAUTOMATOR,
                             f'new UiSelector().textContains("{pattern}")')
                         if elements:
                             first_element = elements[0]
-                            element_text = first_element.text if hasattr(first_element, 'text') else pattern
+                            element_text = getattr(first_element, 'text', pattern)
                             print(f"   🖱️  Clicking: '{element_text}'")
                             first_element.click()
-                            app_clicked = True
-                            time.sleep(5)
-                            print(f"   ✅ Clicked on app")
-                            break
+                            app_found = True
+                            time.sleep(3)
+                            print(f"   ✅ Found and clicked app: {pattern}")
+                            return True
                     except Exception as e:
-                        print(f"   ⚠️  Could not find/click app with pattern '{pattern}': {e}")
-                        continue
-                if not app_clicked:
-                    print(f"   ❌ Could not find app in results (attempt {search_attempt+1})")
-                    self.take_screenshot(f"search_app_not_found_{search_attempt+1}")
-                    # Kill Play Store and retry
-                    print("   🔄 Killing Play Store app and retrying...")
-                    self._run_adb_command(['shell', 'am', 'force-stop', 'com.android.vending'])
-                    time.sleep(2)
-                    print("   🔄 Relaunching Play Store app...")
-                    self.open_play_store()
-                    time.sleep(5)
-                    # Handle crash dialog after relaunch
-                    if self._handle_app_crash_dialog():
-                        print("   🔧 Handled crash after relaunch, continuing...")
-                        time.sleep(3)
+                        print(f"   ⚠️  Could not find/click app with pattern '{pattern}': {str(e)[:80]}")
+            
+            if not app_found:
+                print(f"   ❌ App not found in results (attempt {search_attempt+1}). Killing Play Store and retrying...")
+                self._run_adb_command(['shell', 'am', 'force-stop', 'com.android.vending'])
+                time.sleep(2)
+                print("   🔄 Relaunching Play Store app...")
+                self.open_play_store()
+                time.sleep(5)
+                # Handle crash dialog after relaunch
+                if self._handle_app_crash_dialog():
+                    print("   🔧 Handled crash after relaunch, continuing...")
+                    time.sleep(3)
                 search_attempt += 1
             if not app_clicked:
                 print("   ❌ Failed to find and click app after all retries.")
-                self.take_screenshot("search_final_failure")
                 return False
             # Step 6: Click on the app from search results
             print(f"\n[Step 6/6] Clicking on '{app_name}' in results...")
@@ -986,10 +983,6 @@ class PlayStoreInstaller:
                         return False
                     except:
                         continue
-                
-                if attempt < 4:
-                    print(f"   ⏳ Retrying... (attempt {attempt + 2}/5)")
-                    time.sleep(5)
             
             print("   ❌ Could not find or click Install button")
             return False
@@ -1005,119 +998,186 @@ class PlayStoreInstaller:
         Robustly search for the app in Play Store, retrying if needed.
         Returns True if app is found and clicked, False otherwise.
         """
-        search_selectors = [
-            ('search_bar_hint', 'new UiSelector().resourceId("com.android.vending:id/search_bar_hint")'),
-            ('search_box_idle_text', 'new UiSelector().resourceId("com.android.vending:id/search_box_idle_text")'),
-            ('Search description', 'new UiSelector().descriptionContains("Search")'),
+        # XPaths provided by user with fallback options
+        # Primary XPath for search icon
+        search_icon_xpath = '//androidx.compose.ui.platform.ComposeView[@resource-id="com.android.vending:id/0_resource_name_obfuscated"]/android.view.View/android.view.View[2]/android.view.View/android.view.View[3]/android.view.View[1]/iwq/android.widget.ImageView'
+        
+        # Fallback XPaths for search icon (more resilient)
+        search_icon_fallback_xpaths = [
+            '//android.widget.ImageView[@content-desc="Search"]',
+            '//android.view.View[@resource-id="com.android.vending:id/search_button"]',
+            '//*[contains(@content-desc, "Search")]',
+            '//android.widget.ImageView[@content-desc="Search Google Play"]'
         ]
-        search_field_selectors = [
-            ('search_bar_text_input', 'new UiSelector().resourceId("com.android.vending:id/search_bar_text_input")'),
-            ('EditText class', 'new UiSelector().className("android.widget.EditText")'),
-        ]
-        search_trigger_methods = [
-            'appium_keycode', 'adb_keyevent', 'ui_button'
-        ]
+        
+        search_input_xpath = '//androidx.compose.ui.platform.ComposeView[@resource-id="com.android.vending:id/0_resource_name_obfuscated"]/android.view.View/android.view.View[1]/android.view.View/android.view.View/android.view.View[2]/android.view.View[1]/android.widget.Button'
+        # XPath to click on the app result after search is triggered
+        app_result_xpath = '//android.view.View[@content-desc="Eptura Engage Eptura, Inc "]'
         search_patterns = [app_name, "Eptura", "Condeco"]
+        
         for attempt in range(max_retries):
             print(f"\n🔍 [Search Attempt {attempt+1}/{max_retries}] for '{app_name}'")
-            self.take_screenshot(f"search_attempt_{attempt+1}_start")
-            # 1. Open search box
-            search_box_opened = False
-            for selector_name, selector in search_selectors:
-                try:
-                    search_icon = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
-                    search_icon.click()
-                    print(f"   ✅ Search box opened using: {selector_name}")
-                    time.sleep(2)
-                    search_box_opened = True
-                    break
-                except Exception as e:
-                    print(f"   ⚠️  Could not open search box with {selector_name}: {e}")
-            if not search_box_opened:
-                print("   ❌ Could not open search box. Retrying after relaunch...")
-                self.take_screenshot(f"search_box_failed_{attempt+1}")
+            
+            # Wait 3 seconds to ensure Play Store UI is fully loaded
+            print("   ⏳ Waiting 3 seconds for Play Store UI to fully load...")
+            time.sleep(3)
+            
+            # Step 1: Click on the search icon (bottom bar)
+            print("   📱 Clicking search icon on bottom navigation bar...")
+            search_icon_clicked = False
+            
+            # Try primary XPath first
+            try:
+                search_icon = self.driver.find_element(AppiumBy.XPATH, search_icon_xpath)
+                search_icon.click()
+                print(f"   ✅ Search icon clicked successfully")
+                search_icon_clicked = True
+                time.sleep(2)
+            except Exception as e:
+                print(f"   ⚠️  Could not click search icon via primary XPath: {str(e)[:80]}")
+                
+                # Try fallback XPaths
+                for fallback_xpath in search_icon_fallback_xpaths:
+                    try:
+                        print(f"   🔄 Trying fallback XPath: {fallback_xpath[:60]}...")
+                        search_icon = self.driver.find_element(AppiumBy.XPATH, fallback_xpath)
+                        search_icon.click()
+                        print(f"   ✅ Search icon clicked successfully via fallback XPath")
+                        search_icon_clicked = True
+                        time.sleep(2)
+                        break
+                    except:
+                        continue
+                
+                # Try using UIAutomator as last resort
+                if not search_icon_clicked:
+                    try:
+                        print(f"   🔄 Trying UIAutomator to find search button...")
+                        search_icon = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
+                            'new UiSelector().descriptionContains("Search")')
+                        search_icon.click()
+                        print(f"   ✅ Search icon clicked successfully via UIAutomator")
+                        search_icon_clicked = True
+                        time.sleep(2)
+                    except Exception as e2:
+                        print(f"   ⚠️  Could not click search icon via UIAutomator: {str(e2)[:80]}")
+            
+            if not search_icon_clicked:
+                print("   ❌ Could not click search icon. Retrying after relaunch...")
                 self._run_adb_command(['shell', 'am', 'force-stop', 'com.android.vending'])
                 time.sleep(2)
                 self.open_play_store()
                 time.sleep(5)
                 continue
-            # 2. Enter app name and verify
+            
+            # Step 2: Click on the search input field
+            print("   🔍 Clicking search input field...")
+            search_input_clicked = False
+            try:
+                search_input = self.driver.find_element(AppiumBy.XPATH, search_input_xpath)
+                search_input.click()
+                print(f"   ✅ Search input field clicked successfully")
+                search_input_clicked = True
+                time.sleep(2)
+            except Exception as e:
+                print(f"   ⚠️  Could not click search input via XPath: {str(e)[:80]}")
+            
+            if not search_input_clicked:
+                print("   ❌ Could not click search input. Retrying after relaunch...")
+                self._run_adb_command(['shell', 'am', 'force-stop', 'com.android.vending'])
+                time.sleep(2)
+                self.open_play_store()
+                time.sleep(5)
+                continue
+            
+            # Step 3: Enter app name in search field
+            print(f"   ⌨️  Typing '{app_name}'...")
             text_entered = False
-            for selector_name, selector in search_field_selectors:
-                try:
-                    search_field = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
-                    search_field.clear()
-                    time.sleep(1)
-                    search_field.send_keys(app_name)
-                    time.sleep(2)
-                    entered_text = getattr(search_field, 'text', None)
-                    if entered_text and app_name.lower() in entered_text.lower():
-                        print(f"   ✅ Verified text entry: '{entered_text}'")
-                        text_entered = True
-                        break
-                    else:
-                        print(f"   ⚠️  Text entry not verified. Field value: '{entered_text}'")
-                except Exception as e:
-                    print(f"   ⚠️  Could not enter text with {selector_name}: {e}")
-            self.take_screenshot(f"search_text_entered_{attempt+1}")
+            try:
+                # Find EditText to enter text
+                edit_text = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().className("android.widget.EditText")')
+                edit_text.clear()
+                time.sleep(0.5)
+                edit_text.send_keys(app_name)
+                time.sleep(2)
+                print(f"   ✅ Text entered successfully: '{app_name}'")
+                text_entered = True
+            except Exception as e:
+                print(f"   ⚠️  Could not enter text: {str(e)[:100]}")
+            
             if not text_entered:
-                print("   ❌ Could not type or verify search text. Retrying after relaunch...")
+                print("   ❌ Could not enter search text. Retrying after relaunch...")
                 self._run_adb_command(['shell', 'am', 'force-stop', 'com.android.vending'])
                 time.sleep(2)
                 self.open_play_store()
                 time.sleep(5)
                 continue
-            # 3. Trigger search using multiple methods
+            
+            # Step 4: Trigger search by pressing Enter
+            print("   🔍 Triggering search...")
             search_triggered = False
-            for method in search_trigger_methods:
+            try:
+                self.driver.press_keycode(66)  # KEYCODE_ENTER
+                print("   ✅ Search triggered via Enter key")
+                search_triggered = True
+                time.sleep(2)  # Wait for search results to load
+                time.sleep(5)
+            except Exception as e:
+                print(f"   ⚠️  Could not trigger search via Enter key: {str(e)[:100]}")
+                # Try ADB method
                 try:
-                    if method == 'appium_keycode':
-                        self.driver.press_keycode(66)  # KEYCODE_ENTER
-                        print("   ✅ Search triggered via Appium KEYCODE_ENTER")
-                        search_triggered = True
-                        break
-                    elif method == 'adb_keyevent':
-                        self._run_adb_command(['shell', 'input', 'keyevent', 'KEYCODE_ENTER'])
-                        print("   ✅ Search triggered via ADB keyevent")
-                        search_triggered = True
-                        break
-                    elif method == 'ui_button':
-                        search_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().descriptionContains("Search")')
-                        search_btn.click()
-                        print("   ✅ Search triggered via UI button")
-                        search_triggered = True
-                        break
-                except Exception as e:
-                    print(f"   ⚠️  Could not trigger search via {method}: {e}")
-            self.take_screenshot(f"search_triggered_{attempt+1}")
-            time.sleep(5)
-            # 4. Check for app in results
+                    self._run_adb_command(['shell', 'input', 'keyevent', 'KEYCODE_ENTER'])
+                    print("   ✅ Search triggered via ADB keyevent")
+                    search_triggered = True
+                    time.sleep(2)  # Wait for search results to load
+                    time.sleep(5)
+                except Exception as e2:
+                    print(f"   ⚠️  Could not trigger search via ADB: {str(e2)[:100]}")
+            
+            # Step 5: Look for app in search results using XPath first (most reliable)
+            print(f"   🔍 Looking for app in search results using XPath...")
             app_found = False
-            for pattern in search_patterns:
-                try:
-                    elements = self.driver.find_elements(AppiumBy.ANDROID_UIAUTOMATOR,
-                        f'new UiSelector().textContains("{pattern}")')
-                    if elements:
-                        first_element = elements[0]
-                        element_text = getattr(first_element, 'text', pattern)
-                        print(f"   🖱️  Clicking: '{element_text}'")
-                        first_element.click()
-                        app_found = True
-                        time.sleep(3)
-                        print(f"   ✅ Found and clicked app: {pattern}")
-                        self.take_screenshot(f"search_success_{attempt+1}")
-                        return True
-                except Exception as e:
-                    print(f"   ⚠️  Could not find/click app with pattern '{pattern}': {e}")
+            
+            # Try XPath first - this is the most reliable method
+            try:
+                print(f"   🔍 Attempting to click app using XPath: {app_result_xpath}")
+                app_element = self.driver.find_element(AppiumBy.XPATH, app_result_xpath)
+                print(f"   🖱️  Clicking app using XPath...")
+                app_element.click()
+                app_found = True
+                time.sleep(3)
+                print(f"   ✅ Found and clicked app via XPath")
+                return True
+            except Exception as e:
+                print(f"   ⚠️  Could not find/click app via XPath: {str(e)[:100]}")
+            
+            # Fallback to text-based patterns if XPath fails
+            if not app_found:
+                print(f"   🔍 Falling back to text-based patterns...")
+                for pattern in search_patterns:
+                    try:
+                        elements = self.driver.find_elements(AppiumBy.ANDROID_UIAUTOMATOR,
+                            f'new UiSelector().textContains("{pattern}")')
+                        if elements:
+                            first_element = elements[0]
+                            element_text = getattr(first_element, 'text', pattern)
+                            print(f"   🖱️  Clicking: '{element_text}'")
+                            first_element.click()
+                            app_found = True
+                            time.sleep(3)
+                            print(f"   ✅ Found and clicked app: {pattern}")
+                            return True
+                    except Exception as e:
+                        print(f"   ⚠️  Could not find/click app with pattern '{pattern}': {str(e)[:80]}")
+            
             if not app_found:
                 print(f"   ❌ App not found in results (attempt {attempt+1}). Killing Play Store and retrying...")
-                self.take_screenshot(f"search_app_not_found_{attempt+1}")
                 self._run_adb_command(['shell', 'am', 'force-stop', 'com.android.vending'])
                 time.sleep(2)
                 self.open_play_store()
                 time.sleep(5)
+        
         print(f"   ❌ Failed to find and click app after {max_retries} attempts.")
-        self.take_screenshot("search_final_failure")
         return False
     
     def search_and_install_app(self, app_name="Eptura Engage"):
@@ -1153,77 +1213,91 @@ class PlayStoreInstaller:
         """
         Main orchestrator for installing Eptura Engage app via Play Store with clear step logs.
         Steps:
+        0. Check if app is already installed and uninstall if needed
         1. Check Play Store installation
-        2. Launch Play Store
-        3. Login with credentials
-        4. Search for Eptura Engage
-        5. Install the app
-        6. Verify installation
+        2. Initialize Appium driver
+        3. Launch Play Store
+        4. Wait for page to load
+        5. Search for Eptura Engage
+        6. Install the app
+        7. Verify installation
         """
         app_package = "com.condecosoftware.condeco"
         app_name = "Eptura Engage"
         print("\n========== EPTURA ENGAGE INSTALLATION FLOW ==========")
         start_time = time.time()  # Track start time for duration
+        
+        # Step 0: Check if app is already installed and uninstall if needed
+        print("Step 0: Checking if Eptura Engage is already installed...")
+        result = self._run_adb_command(['shell', 'pm', 'list', 'packages', app_package], timeout=20)
+        if result and app_package in result.stdout:
+            print("   ⚠️  Eptura Engage is already installed")
+            print("   🗑️  Uninstalling Eptura Engage...")
+            uninstall_result = self._run_adb_command(['uninstall', app_package], timeout=30)
+            if uninstall_result and uninstall_result.returncode == 0:
+                print("   ✅ Eptura Engage uninstalled successfully")
+                time.sleep(3)
+            else:
+                print("   ⚠️  Could not uninstall Eptura Engage, continuing anyway...")
+                if uninstall_result:
+                    print(f"   Error: {uninstall_result.stderr[:100]}")
+        else:
+            print("   ✅ Eptura Engage is not installed")
+        time.sleep(1)
+        
         print("Step 1: Checking Play Store installation...")
         result = self._run_adb_command(['shell', 'pm', 'list', 'packages', 'com.android.vending'], timeout=10)
-        time.sleep(3)
-        self.take_screenshot("step1_playstore_check")
+        time.sleep(2)
         if not result or 'com.android.vending' not in result.stdout:
-            print("   ❌ Play Store NOT installed. Attempting to download/install Play Store APK...")
-            print("   ⚠️  Play Store installation logic not implemented. Please use an emulator with Play Store.")
-            time.sleep(2)
-            self.take_screenshot("step1_playstore_not_found")
+            print("   ❌ Play Store NOT installed.")
             self._print_installation_summary(False, start_time)
             return False
         print("   ✅ Play Store is installed.")
-        time.sleep(2)
+        time.sleep(1)
 
-        print("\nStep 2: Launching Play Store app...")
+        print("\nStep 2: Initializing Appium driver...")
+        self.setup_driver()
+        if not self.driver:
+            print("   ❌ Failed to initialize Appium driver.")
+            self._print_installation_summary(False, start_time)
+            return False
+        print("   ✅ Appium driver initialized.")
+        time.sleep(1)
+
+        print("\nStep 3: Launching Play Store app...")
         playstore_launched = self.open_play_store()
-        time.sleep(5)
-        self.take_screenshot("step2_playstore_launch")
         if not playstore_launched:
             print("   ❌ Failed to launch Play Store app.")
             self._print_installation_summary(False, start_time)
             return False
         print("   ✅ Play Store app launched.")
-        time.sleep(2)
-
-        print("\nStep 3: Logging in with provided credentials...")
-        login_result = self.login_to_google_account()
+        
+        print("\nStep 4: Waiting for Play Store to fully load...")
         time.sleep(5)
-        self.take_screenshot("step3_login")
-        if not login_result:
-            print("   ❌ Login failed. Please check credentials or emulator state.")
-            self._print_installation_summary(False, start_time)
-            return False
-        print("   ✅ Login successful.")
-        time.sleep(2)
+        print("   ✅ Play Store page loaded.")
+        time.sleep(1)
 
-        print(f"\nStep 4: Searching for '{app_name}' in Play Store...")
+        print(f"\nStep 5: Searching for '{app_name}' in Play Store...")
         search_success = self._search_app_in_playstore(app_name)
-        time.sleep(5)
-        self.take_screenshot("step4_search")
+        time.sleep(3)
         if not search_success:
             print(f"   ❌ Failed to search for '{app_name}'.")
             self._print_installation_summary(False, start_time)
             return False
         print(f"   ✅ Found '{app_name}' in Play Store.")
-        time.sleep(2)
+        time.sleep(1)
 
-        print(f"\nStep 5: Installing '{app_name}'...")
+        print(f"\nStep 6: Installing '{app_name}'...")
         install_success = self._install_app_from_playstore(app_package)
-        time.sleep(5)
-        self.take_screenshot("step5_install")
+        time.sleep(3)
         if not install_success:
             print(f"   ❌ Failed to install '{app_name}'.")
             self._print_installation_summary(False, start_time)
             return False
         print(f"   ✅ '{app_name}' installation initiated.")
-        time.sleep(2)
+        time.sleep(1)
 
-        print(f"\nStep 6: Verifying installation of '{app_name}'...")
-        # Add robust wait and retry for installation verification
+        print(f"\nStep 7: Verifying installation of '{app_name}'...")
         max_wait = 300  # 5 minutes
         check_interval = 10
         wait_time = 0
@@ -1231,7 +1305,6 @@ class PlayStoreInstaller:
         while wait_time < max_wait:
             verify_result = self._verify_app_installed(app_package)
             time.sleep(2)
-            self.take_screenshot(f"step6_verification_{wait_time}s")
             if verify_result:
                 print(f"   ✅ '{app_name}' is installed successfully!")
                 verified = True
@@ -1242,7 +1315,6 @@ class PlayStoreInstaller:
                 print(f"      Still waiting for installation... ({wait_time}/{max_wait}s)")
         if not verified:
             print(f"   ❌ '{app_name}' installation verification failed after {max_wait}s.")
-            self.take_screenshot("step6_verification_failed")
         self._print_installation_summary(verified, start_time)
         return verified
 
@@ -1256,12 +1328,113 @@ class PlayStoreInstaller:
         print(f"Duration: {duration} seconds")
         print("============================================================\n")
 
+    def _handle_app_crash_dialog(self):
+        """Handle and dismiss app crash dialogs if present"""
+        try:
+            crash_texts = ["Close", "CLOSE", "OK", "Restart", "RESTART"]
+            for text in crash_texts:
+                try:
+                    crash_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
+                                                        f'new UiSelector().textContains("{text}")')
+                    try:
+                        self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
+                                                'new UiSelector().textContains("error")')
+                        crash_btn.click()
+                        print(f"   ✅ Dismissed crash dialog with '{text}' button")
+                        return True
+                    except:
+                        pass
+                except:
+                    pass
+            return False
+        except Exception as e:
+            return False
+    
+    def _install_app_from_playstore(self, package_name="com.condecosoftware.condeco", max_attempts=5):
+        """
+        Click Install button and wait for installation to complete
+        """
+        print(f"📲 Looking for Install button...")
+        install_texts = ["Install", "INSTALL", "Update", "UPDATE", "Get"]
+        
+        for attempt in range(max_attempts):
+            if self._handle_app_crash_dialog():
+                print("   🔧 Handled crash, continuing...")
+                time.sleep(3)
+            
+            for text in install_texts:
+                try:
+                    install_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
+                        f'new UiSelector().textContains("{text}")')
+                    
+                    button_text = getattr(install_btn, 'text', text)
+                    
+                    if button_text.upper() in ["OPEN"]:
+                        print(f"   ✅ App already installed!")
+                        return True
+                    
+                    print(f"   🔍 Found '{button_text}' button")
+                    install_btn.click()
+                    print(f"   ✅ Clicked '{button_text}' button")
+                    time.sleep(2)
+                    return True
+                    
+                except:
+                    continue
+            
+            if attempt < max_attempts - 1:
+                print(f"   ⏳ Retrying... (attempt {attempt + 2}/{max_attempts})")
+                time.sleep(5)
+        
+        print("   ❌ Could not find or click Install button")
+        return False
+    
+    def _verify_app_installed(self, package_name):
+        """Verify app is installed via ADB"""
+        try:
+            result = self._run_adb_command(['shell', 'pm', 'list', 'packages', package_name], timeout=10)
+            if result and package_name in result.stdout:
+                return True
+            return False
+        except Exception as e:
+            print(f"   ⚠️  Error verifying installation: {e}")
+            return False
+
+    def _dismiss_initial_dialogs(self):
+        """Dismiss any initial dialogs or alerts that appear after launching Play Store"""
+        print("   🔔 Checking for initial dialogs/alerts...")
+        dismiss_texts = ["Got it", "GOT IT", "OK", "OK, thanks", "Close", "CLOSE", "Accept", "ACCEPT", "I agree", "AGREE"]
+        dialogs_dismissed = 0
+        
+        for attempt in range(3):  # Try multiple times for different dialogs
+            for text in dismiss_texts:
+                try:
+                    dismiss_btn = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR,
+                                                          f'new UiSelector().textContains("{text}")')
+                    dismiss_btn.click()
+                    print(f"   ✅ Dismissed dialog: '{text}'")
+                    dialogs_dismissed += 1
+                    time.sleep(2)
+                except:
+                    pass
+        
+        if dialogs_dismissed > 0:
+            print(f"   📊 Dismissed {dialogs_dismissed} dialog(s)")
+        return True
+
 if __name__ == "__main__":
-    email = os.environ.get("GOOGLE_EMAIL")
-    password = os.environ.get("GOOGLE_PASSWORD")
-    if not email or not password:
-        print("❌ ERROR: GOOGLE_EMAIL and GOOGLE_PASSWORD environment variables must be set.")
+    # Use hardcoded credentials from configuration section at the top
+    email = GOOGLE_EMAIL
+    password = GOOGLE_PASSWORD
+    
+    if not email or email == "your_email@gmail.com":
+        print("❌ ERROR: Please set your Google email in the GOOGLE_EMAIL variable at the top of this script.")
         sys.exit(1)
+    if not password or password == "your_password":
+        print("❌ ERROR: Please set your Google password in the GOOGLE_PASSWORD variable at the top of this script.")
+        sys.exit(1)
+    
+    print(f"📧 Using email: {email}")
     installer = PlayStoreInstaller(email, password)
     success = installer.install_eptura_engage_app()
     sys.exit(0 if success else 1)

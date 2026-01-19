@@ -41,3 +41,15 @@ bin/
 # OS
 .DS_Store
 Thumbs.db
+
+# Azure Blob Storage - Environment files with secrets
+.env
+*.apk
+app.apk
+downloaded-app.apk
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.Python
