@@ -1,20 +1,20 @@
-[ERROR] 
-[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
-[ERROR] Re-run Maven using the -X switch to enable full debug logging.
-[ERROR] 
-[ERROR] For more information about the errors and possible solutions, please read the following articles:
-[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
 
-The process '/usr/bin/mvn' failed with exit code 1
-Could not retrieve code analysis results - Maven run failed.
-Result Attachments will be stored in LogStore
-Run Attachments will be stored in LogStore
-##[error]Build failed.
-Async Command Start: Publish test results
-Publishing test results to test run '82'.
-TestResults To Publish 10, Test run id:82
-Test results publishing 10, remaining: 0. Test run id: 82
-Published Test Run : https://dev.azure.com/EpturaEnterpriseDevOps/Enterprise/_TestManagement/Runs?runId=82&_a=runCharts
-Flaky failed test results are opted out of pass percentage
-Async Command End: Publish test results
-Finishing: Run Tests
+Processing triggers for dbus (1.14.10-4ubuntu4.1) ...
+Setting up glib-networking:amd64 (2.80.0-1build1) ...
+Setting up libsoup-3.0-0:amd64 (3.4.4-5ubuntu0.6) ...
+Setting up gstreamer1.0-plugins-good:amd64 (1.24.2-1ubuntu1.2) ...
+Processing triggers for libc-bin (2.39-0ubuntu8.6) ...
+
+Running kernel seems to be up-to-date.
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+info: Adding user `vsts' to group `kvm' ...
+⏳ Waiting for emulator to boot...
+* daemon not running; starting now at tcp:5037
+* daemon started successfully

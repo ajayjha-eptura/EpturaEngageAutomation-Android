@@ -209,41 +209,136 @@ stages:
               export ANDROID_HOME=$(ANDROID_HOME)
               export ANDROID_SDK_ROOT=$(ANDROID_HOME)
               
-              # Enable KVM for hardware acceleration
+              # Enable KVM for hardware acceleration (if available)
               sudo apt-get update -qq
               sudo apt-get install -y -qq cpu-checker qemu-kvm libvirt-daemon-system
-              sudo adduser $USER kvm || true
-              sudo chown $USER /dev/kvm || true
+              sudo adduser $USER kvm 2>/dev/null || true
+              sudo chown $USER /dev/kvm 2>/dev/null || true
               
-              # Start emulator in background with no window
-              nohup $(ANDROID_HOME)/emulator/emulator -avd test_emulator -no-window -no-audio -no-boot-anim -gpu host -accel on -memory 2048 -cores 2 -netfast -skip-adb-auth -no-snapshot -wipe-data > emulator.log 2>&1 &
+              # Check if KVM is available
+              KVM_AVAILABLE=false
+              if [ -e /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+                echo "✅ KVM is available"
+                KVM_AVAILABLE=true
+                ACCEL_FLAG="-accel on"
+              else
+                echo "⚠️ KVM not available, using software rendering (slower)"
+                ACCEL_FLAG="-accel off"
+              fi
               
-              # Wait for emulator to boot
-              echo "⏳ Waiting for emulator to boot..."
-              adb wait-for-device
+              # Kill any existing emulator or adb processes
+              pkill -9 emulator || true
+              pkill -9 qemu || true
+              adb kill-server || true
+              sleep 2
+              adb start-server
               
-              # Wait for boot completion
-              boot_completed=""
-              timeout=300
-              counter=0
-              while [ "$boot_completed" != "1" ] && [ $counter -lt $timeout ]; do
-                boot_completed=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-                counter=$((counter + 5))
-                if [ "$boot_completed" != "1" ]; then
-                  echo "Waiting for boot... ($counter seconds)"
-                  sleep 5
+              # Start emulator with optimized settings for CI
+              # Using -gpu swiftshader_indirect for better CI compatibility
+              echo "🚀 Launching emulator..."
+              nohup $(ANDROID_HOME)/emulator/emulator \
+                -avd test_emulator \
+                -no-window \
+                -no-audio \
+                -no-boot-anim \
+                -gpu swiftshader_indirect \
+                $ACCEL_FLAG \
+                -memory 2048 \
+                -cores 2 \
+                -netfast \
+                -skip-adb-auth \
+                -no-snapshot \
+                -no-snapshot-load \
+                -no-snapshot-save \
+                -wipe-data \
+                -verbose \
+                > emulator.log 2>&1 &
+              
+              EMULATOR_PID=$!
+              echo "Emulator PID: $EMULATOR_PID"
+              
+              # Wait for emulator to boot with proper timeout
+              echo "⏳ Waiting for emulator device..."
+              
+              # Wait for device with timeout (60 seconds)
+              DEVICE_TIMEOUT=60
+              DEVICE_COUNTER=0
+              while [ $DEVICE_COUNTER -lt $DEVICE_TIMEOUT ]; do
+                if adb devices | grep -q "emulator"; then
+                  echo "✅ Emulator device detected"
+                  break
                 fi
+                
+                # Check if emulator process is still running
+                if ! ps -p $EMULATOR_PID > /dev/null 2>&1; then
+                  echo "❌ Emulator process died unexpectedly"
+                  echo "=== Emulator Log ==="
+                  cat emulator.log || true
+                  exit 1
+                fi
+                
+                DEVICE_COUNTER=$((DEVICE_COUNTER + 5))
+                echo "Waiting for device... ($DEVICE_COUNTER/$DEVICE_TIMEOUT seconds)"
+                sleep 5
               done
               
-              if [ "$boot_completed" = "1" ]; then
-                echo "✅ Android Emulator started and booted successfully"
-                adb devices
-              else
-                echo "❌ Emulator failed to boot within timeout"
-                cat emulator.log
+              if [ $DEVICE_COUNTER -ge $DEVICE_TIMEOUT ]; then
+                echo "❌ Timeout waiting for emulator device"
+                echo "=== Emulator Log ==="
+                cat emulator.log || true
                 exit 1
               fi
+              
+              # Wait for boot completion with timeout (180 seconds)
+              echo "⏳ Waiting for boot completion..."
+              BOOT_TIMEOUT=180
+              BOOT_COUNTER=0
+              while [ $BOOT_COUNTER -lt $BOOT_TIMEOUT ]; do
+                BOOT_COMPLETED=$(adb -e shell getprop sys.boot_completed 2>/dev/null | tr -d '\r\n' || echo "")
+                
+                if [ "$BOOT_COMPLETED" = "1" ]; then
+                  echo "✅ Boot completed!"
+                  break
+                fi
+                
+                # Check if emulator process is still running
+                if ! ps -p $EMULATOR_PID > /dev/null 2>&1; then
+                  echo "❌ Emulator process died during boot"
+                  echo "=== Emulator Log ==="
+                  cat emulator.log || true
+                  exit 1
+                fi
+                
+                BOOT_COUNTER=$((BOOT_COUNTER + 10))
+                echo "Waiting for boot... ($BOOT_COUNTER/$BOOT_TIMEOUT seconds) - boot_completed='$BOOT_COMPLETED'"
+                sleep 10
+              done
+              
+              if [ $BOOT_COUNTER -ge $BOOT_TIMEOUT ]; then
+                echo "❌ Emulator failed to boot within timeout"
+                echo "=== Last 100 lines of Emulator Log ==="
+                tail -100 emulator.log || true
+                echo "=== ADB Devices ==="
+                adb devices -l || true
+                exit 1
+              fi
+              
+              # Additional wait for system UI to be ready
+              echo "⏳ Waiting for system UI..."
+              sleep 15
+              
+              # Disable animations for faster test execution
+              adb -e shell settings put global window_animation_scale 0
+              adb -e shell settings put global transition_animation_scale 0
+              adb -e shell settings put global animator_duration_scale 0
+              
+              # Unlock screen
+              adb -e shell input keyevent 82
+              
+              echo "✅ Android Emulator started and booted successfully"
+              adb devices -l
             displayName: 'Start Android Emulator'
+            timeoutInMinutes: 10
 
           - script: |
               set -e
