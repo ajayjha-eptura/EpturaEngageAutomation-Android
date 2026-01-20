@@ -11,7 +11,10 @@ public class LoginPage extends DriverFactory {
    private final By EpturaURL = By.id("com.condecosoftware.condeco:id/editTextServerUrl");
    private final By UserCredentials_Screen=By.id("com.condecosoftware.condeco:id/title");
   // private final By passwordField = By.id("com.client.app:id/password");
-   private final By Continue_btn=By.className("android.widget.Button");
+   // Fixed: Use more specific locator for Continue button - try ID first, then text-based xpath
+   private final By Continue_btn=By.id("com.condecosoftware.condeco:id/button");
+   private final By Continue_btn_by_text=By.xpath("//android.widget.Button[@text='Continue' or @text='CONTINUE' or contains(@text,'ontinue')]");
+   private final By Continue_btn_by_class=By.className("android.widget.Button");
    
    private final By Username_id=By.id("com.condecosoftware.condeco:id/username");
    private final By Password_id=By.id("com.condecosoftware.condeco:id/password");
@@ -156,9 +159,9 @@ public class LoginPage extends DriverFactory {
             Thread.sleep(3000);
             
             // Handle any notifications or permission dialogs that might be blocking
-            System.out.println("🔔 Checking for and dismissing any notifications...");
-            Utility.handleAppNotifications();
-            Thread.sleep(1000);
+           // System.out.println("🔔 Checking for and dismissing any notifications...");
+          //  Utility.handleAppNotifications();
+           // Thread.sleep(1000);
 
             // Check if we need to enter the URL or if we're already on the username/password screen
             // Use longer timeouts to handle slow loading
@@ -175,7 +178,7 @@ public class LoginPage extends DriverFactory {
                 System.out.println("Current Activity: " + driver.currentActivity());
                 
                 // Handle notifications again in case they appeared
-                Utility.handleAppNotifications();
+               // Utility.handleAppNotifications();
                 Thread.sleep(2000);
                 
                 // Retry detection with longer timeout
@@ -191,7 +194,7 @@ public class LoginPage extends DriverFactory {
                     }
                     
                     // Handle any popups and wait before next retry
-                    Utility.handleAppNotifications();
+                  //  Utility.handleAppNotifications();
                     Thread.sleep(3000);
                 }
                 
@@ -249,8 +252,8 @@ public class LoginPage extends DriverFactory {
                 Thread.sleep(2000);
                 
                 // Now wait for the username field to appear with a longer timeout
-                System.out.println("Waiting for username field with explicit wait (30 seconds timeout)...");
-                WebDriverWait usernameWait = new WebDriverWait(driver, Duration.ofSeconds(30));
+                System.out.println("Waiting for username field with explicit wait (60 seconds timeout)...");
+                WebDriverWait usernameWait = new WebDriverWait(driver, Duration.ofSeconds(60));
                 try {
                     usernameWait.until(ExpectedConditions.visibilityOfElementLocated(Username_id));
                     System.out.println("✅ Username field found - successfully transitioned to credentials screen");
@@ -292,7 +295,7 @@ public class LoginPage extends DriverFactory {
             System.out.println("========================================");
             
             // Ensure username field is still visible and interactable
-            WebDriverWait credWait = new WebDriverWait(driver, Duration.ofSeconds(15));
+            WebDriverWait credWait = new WebDriverWait(driver, Duration.ofSeconds(30));
             credWait.until(ExpectedConditions.visibilityOfElementLocated(Username_id));
             credWait.until(ExpectedConditions.elementToBeClickable(Username_id));
             
@@ -331,10 +334,10 @@ public class LoginPage extends DriverFactory {
 
             // Wait for page to load after login submission
             System.out.println("⏳ Waiting for page to load after login...");
-            Thread.sleep(0300); // Initial wait for transition to start
+            Thread.sleep(3000); // Initial wait for transition to start
             
             // Wait for login screen to disappear (username field should not be visible)
-            WebDriverWait postLoginWait = new WebDriverWait(driver, Duration.ofSeconds(30));
+            WebDriverWait postLoginWait = new WebDriverWait(driver, Duration.ofSeconds(60));
             try {
                 postLoginWait.until(ExpectedConditions.invisibilityOfElementLocated(Username_id));
                 System.out.println("✅ Login screen disappeared - page is loading");
