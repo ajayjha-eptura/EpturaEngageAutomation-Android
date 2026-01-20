@@ -70,9 +70,11 @@ stages:
               unzip -q commandlinetools-linux-9477386_latest.zip
               mkdir -p cmdline-tools/latest
               mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
-              export PATH=$(ANDROID_HOME)/cmdline-tools/latest/bin:$PATH
+              export PATH=$(ANDROID_HOME)/cmdline-tools/latest/bin:$(ANDROID_HOME)/platform-tools:$(ANDROID_HOME)/emulator:$PATH
               yes | sdkmanager --licenses || true
-              sdkmanager "platform-tools" "platforms;android-30" "emulator" "build-tools;30.0.3"
+              # Using google_apis_playstore instead of google_apis to avoid root detection
+              # Play Store images are non-rooted and production-like
+              sdkmanager "platform-tools" "platforms;android-30" "emulator" "build-tools;30.0.3" "system-images;android-30;google_apis_playstore;x86_64"
               echo "✅ Android SDK installed"
             displayName: 'Install Android SDK'
 
@@ -185,7 +187,9 @@ stages:
               mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
               export PATH=$(ANDROID_HOME)/cmdline-tools/latest/bin:$(ANDROID_HOME)/platform-tools:$(ANDROID_HOME)/emulator:$PATH
               yes | sdkmanager --licenses || true
-              sdkmanager "platform-tools" "platforms;android-30" "emulator" "build-tools;30.0.3" "system-images;android-30;google_apis;x86_64"
+              # Using google_apis_playstore instead of google_apis to avoid root detection
+              # Play Store images are non-rooted and production-like
+              sdkmanager "platform-tools" "platforms;android-30" "emulator" "build-tools;30.0.3" "system-images;android-30;google_apis_playstore;x86_64"
               echo "✅ Android SDK installed"
             displayName: 'Install Android SDK'
 
@@ -196,8 +200,8 @@ stages:
               export ANDROID_HOME=$(ANDROID_HOME)
               export ANDROID_SDK_ROOT=$(ANDROID_HOME)
               
-              # Create AVD (Android Virtual Device)
-              echo "no" | avdmanager create avd -n test_emulator -k "system-images;android-30;google_apis;x86_64" --force
+              # Create AVD using Play Store image (non-rooted)
+              echo "no" | avdmanager create avd -n test_emulator -k "system-images;android-30;google_apis_playstore;x86_64" --force
               
               echo "✅ Android Emulator created"
             displayName: 'Create Android Emulator'
