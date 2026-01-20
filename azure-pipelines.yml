@@ -185,7 +185,7 @@ stages:
               mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
               export PATH=$(ANDROID_HOME)/cmdline-tools/latest/bin:$(ANDROID_HOME)/platform-tools:$(ANDROID_HOME)/emulator:$PATH
               yes | sdkmanager --licenses || true
-              sdkmanager "platform-tools" "platforms;android-30" "emulator" "build-tools;30.0.3" "system-images;android-30;google_apis_playstore;x86_64"
+              sdkmanager "platform-tools" "platforms;android-30" "emulator" "build-tools;30.0.3" "system-images;android-30;google_apis;x86_64"
               echo "✅ Android SDK installed"
             displayName: 'Install Android SDK'
 
@@ -197,7 +197,7 @@ stages:
               export ANDROID_SDK_ROOT=$(ANDROID_HOME)
               
               # Create AVD (Android Virtual Device)
-              echo "no" | avdmanager create avd -n test_emulator -k "system-images;android-30;google_apis_playstore;x86_64" --force
+              echo "no" | avdmanager create avd -n test_emulator -k "system-images;android-30;google_apis;x86_64" --force
               
               echo "✅ Android Emulator created"
             displayName: 'Create Android Emulator'
@@ -210,13 +210,13 @@ stages:
               export ANDROID_SDK_ROOT=$(ANDROID_HOME)
               
               # Enable KVM for hardware acceleration
-              sudo apt-get update
-              sudo apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq cpu-checker qemu-kvm libvirt-daemon-system
               sudo adduser $USER kvm || true
               sudo chown $USER /dev/kvm || true
               
               # Start emulator in background with no window
-              nohup $(ANDROID_HOME)/emulator/emulator -avd test_emulator -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data > emulator.log 2>&1 &
+              nohup $(ANDROID_HOME)/emulator/emulator -avd test_emulator -no-window -no-audio -no-boot-anim -gpu host -accel on -memory 2048 -cores 2 -netfast -skip-adb-auth -no-snapshot -wipe-data > emulator.log 2>&1 &
               
               # Wait for emulator to boot
               echo "⏳ Waiting for emulator to boot..."
