@@ -201,9 +201,19 @@ stages:
               export ANDROID_SDK_ROOT=$(ANDROID_HOME)
               
               # Create AVD using Play Store image (non-rooted)
-              echo "no" | avdmanager create avd -n test_emulator -k "system-images;android-30;google_apis_playstore;x86_64" --force
+              echo "no" | avdmanager create avd -n test_emulator -k "system-images;android-30;google_apis_playstore;x86_64" -d pixel_4 --force
               
-              echo "✅ Android Emulator created"
+              # Configure AVD with proper screen settings for Pixel 4
+              AVD_DIR="$HOME/.android/avd/test_emulator.avd"
+              if [ -f "$AVD_DIR/config.ini" ]; then
+                echo "📝 Configuring AVD screen settings..."
+                echo "hw.lcd.density=440" >> "$AVD_DIR/config.ini"
+                echo "hw.lcd.width=1080" >> "$AVD_DIR/config.ini"
+                echo "hw.lcd.height=2280" >> "$AVD_DIR/config.ini"
+                echo "hw.keyboard=yes" >> "$AVD_DIR/config.ini"
+              fi
+              
+              echo "✅ Android Emulator created with Pixel 4 profile (1080x2280)"
             displayName: 'Create Android Emulator'
 
           - script: |
@@ -585,3 +595,4 @@ stages:
               mergeTestResults: true
               failTaskOnFailedTests: false
             condition: always()
+
