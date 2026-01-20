@@ -32,7 +32,7 @@ variables:
   AZURE_STORAGE_CONTAINER: 'mobilebuilds'
   # AZURE_SAS_TOKEN: Configure this as a SECRET variable in Azure DevOps Pipeline Variables
   APK_BLOB_NAME: 'Engage/Android/EpturaEngage.apk'
-  APK_LOCAL_PATH: '$(Build.SourcesDirectory)/app.apk'
+  APK_LOCAL_PATH: '$(Build.SourcesDirectory)/EpturaEngage.apk'
 
 stages:
   - stage: Setup
@@ -185,13 +185,69 @@ stages:
               mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
               export PATH=$(ANDROID_HOME)/cmdline-tools/latest/bin:$(ANDROID_HOME)/platform-tools:$(ANDROID_HOME)/emulator:$PATH
               yes | sdkmanager --licenses || true
-              sdkmanager "platform-tools" "platforms;android-30" "emulator" "build-tools;30.0.3"
+              sdkmanager "platform-tools" "platforms;android-30" "emulator" "build-tools;30.0.3" "system-images;android-30;google_apis;x86_64"
               echo "✅ Android SDK installed"
             displayName: 'Install Android SDK'
 
           - script: |
               set -e
-              echo "🔧 Setting up environment..."
+              echo "📱 Creating Android Emulator..."
+              export PATH=$(ANDROID_HOME)/cmdline-tools/latest/bin:$(ANDROID_HOME)/platform-tools:$(ANDROID_HOME)/emulator:$PATH
+              export ANDROID_HOME=$(ANDROID_HOME)
+              export ANDROID_SDK_ROOT=$(ANDROID_HOME)
+              
+              # Create AVD (Android Virtual Device)
+              echo "no" | avdmanager create avd -n test_emulator -k "system-images;android-30;google_apis;x86_64" --force
+              
+              echo "✅ Android Emulator created"
+            displayName: 'Create Android Emulator'
+
+          - script: |
+              set -e
+              echo "🚀 Starting Android Emulator..."
+              export PATH=$(ANDROID_HOME)/cmdline-tools/latest/bin:$(ANDROID_HOME)/platform-tools:$(ANDROID_HOME)/emulator:$PATH
+              export ANDROID_HOME=$(ANDROID_HOME)
+              export ANDROID_SDK_ROOT=$(ANDROID_HOME)
+              
+              # Enable KVM for hardware acceleration
+              sudo apt-get update
+              sudo apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils
+              sudo adduser $USER kvm || true
+              sudo chown $USER /dev/kvm || true
+              
+              # Start emulator in background with no window
+              nohup $(ANDROID_HOME)/emulator/emulator -avd test_emulator -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data > emulator.log 2>&1 &
+              
+              # Wait for emulator to boot
+              echo "⏳ Waiting for emulator to boot..."
+              adb wait-for-device
+              
+              # Wait for boot completion
+              boot_completed=""
+              timeout=300
+              counter=0
+              while [ "$boot_completed" != "1" ] && [ $counter -lt $timeout ]; do
+                boot_completed=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+                counter=$((counter + 5))
+                if [ "$boot_completed" != "1" ]; then
+                  echo "Waiting for boot... ($counter seconds)"
+                  sleep 5
+                fi
+              done
+              
+              if [ "$boot_completed" = "1" ]; then
+                echo "✅ Android Emulator started and booted successfully"
+                adb devices
+              else
+                echo "❌ Emulator failed to boot within timeout"
+                cat emulator.log
+                exit 1
+              fi
+            displayName: 'Start Android Emulator'
+
+          - script: |
+              set -e
+              echo "🔧 Setting up Appium..."
               export PATH=$(ANDROID_HOME)/cmdline-tools/latest/bin:$(ANDROID_HOME)/platform-tools:$(ANDROID_HOME)/emulator:$PATH
               export ANDROID_HOME=$(ANDROID_HOME)
               export ANDROID_SDK_ROOT=$(ANDROID_HOME)
@@ -202,18 +258,74 @@ stages:
               
               # Start Appium server
               echo "🚀 Starting Appium server..."
-              appium --address 127.0.0.1 --port 4723 --session-override > appium.log 2>&1 &
+              nohup appium --address 127.0.0.1 --port 4723 --session-override --relaxed-security > appium.log 2>&1 &
               sleep 10
               
-              echo "✅ Appium server started"
-            displayName: 'Setup Test Environment'
+              # Verify Appium is running
+              if curl -s http://127.0.0.1:4723/status | grep -q "ready"; then
+                echo "✅ Appium server started successfully"
+              else
+                echo "⚠️ Appium server may not be ready, continuing..."
+              fi
+            displayName: 'Setup Appium'
+
+          - script: |
+              set -e
+              echo "📲 Installing APK from Azure Blob Storage on emulator..."
+              export PATH=$(ANDROID_HOME)/platform-tools:$PATH
+              
+              # Wait a bit more for emulator to be fully ready
+              sleep 10
+              
+              echo "🔍 Searching for APK file downloaded from blob storage..."
+              echo "Contents of Build.SourcesDirectory:"
+              ls -la $(Build.SourcesDirectory)/
+              
+              # Try to find the APK file - it could be named EpturaEngage.apk or EpturaEngage.apk
+              APK_FILE=""
+              
+              # Check for EpturaEngage.apk (the expected name from blob download)
+              if [ -f "$(Build.SourcesDirectory)/EpturaEngage.apk" ]; then
+                APK_FILE="$(Build.SourcesDirectory)/EpturaEngage.apk"
+                echo "✅ Found APK at: $APK_FILE"
+              # Check for any .apk file in the source directory
+              elif [ -n "$(find $(Build.SourcesDirectory) -maxdepth 1 -name '*.apk' -type f 2>/dev/null | head -1)" ]; then
+                APK_FILE=$(find $(Build.SourcesDirectory) -maxdepth 1 -name '*.apk' -type f | head -1)
+                echo "✅ Found APK at: $APK_FILE"
+              # Check recursively for any .apk file
+              elif [ -n "$(find $(Build.SourcesDirectory) -name '*.apk' -type f 2>/dev/null | head -1)" ]; then
+                APK_FILE=$(find $(Build.SourcesDirectory) -name '*.apk' -type f | head -1)
+                echo "✅ Found APK at: $APK_FILE"
+              fi
+              
+              if [ -n "$APK_FILE" ] && [ -f "$APK_FILE" ]; then
+                echo "📱 APK file details:"
+                ls -la "$APK_FILE"
+                echo "📲 Installing APK on emulator..."
+                adb install -r "$APK_FILE"
+                
+                # Verify the app is installed
+                if adb shell pm list packages | grep -q "com.condecosoftware.condeco"; then
+                  echo "✅ APK from blob storage installed and verified successfully!"
+                else
+                  echo "⚠️ APK installed but package verification failed. Continuing anyway..."
+                fi
+              else
+                echo "❌ ERROR: No APK file found from blob storage!"
+                echo "📁 Full directory listing:"
+                find $(Build.SourcesDirectory) -type f -name "*.apk" 2>/dev/null || echo "No APK files found"
+                echo "📁 All files in source directory:"
+                find $(Build.SourcesDirectory) -type f | head -50
+                exit 1
+              fi
+            displayName: 'Install APK on Emulator'
 
           - task: Maven@3
             displayName: 'Run Tests'
             inputs:
               mavenPomFile: 'pom.xml'
               goals: 'test'
-              options: '-Dtestng.xml=testng.xml $(MAVEN_OPTS)'
+              options: '-Dtestng.xml=testng.xml -DdeviceName=emulator-5554 $(MAVEN_OPTS)'
               publishJUnitResults: true
               testResultsFiles: '**/surefire-reports/TEST-*.xml'
               testRunTitle: 'Eptura Engage Android Tests'
