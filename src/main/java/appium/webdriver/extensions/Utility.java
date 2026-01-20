@@ -79,13 +79,13 @@ public class Utility {
         for (int i = 0; i < 3; i++) {
             try {
                 // Check for system notification
-                if (isElementPresent(appNotificationAllowButton, 5)) {
+                if (isElementPresent(appNotificationAllowButton, 10)) {
                     clickElement(appNotificationAllowButton, 5);
                     System.out.println("Allowed App to send notifications");
                 }
 
                 // Check for app-specific notification
-                if (isElementPresent(automaticCheckInCancelButton, 5)) {
+                if (isElementPresent(automaticCheckInCancelButton, 20)) {
                     clickElement(automaticCheckInCancelButton, 5);
                     System.out.println("Automatic Check-In notification dismissed.");
                 }
