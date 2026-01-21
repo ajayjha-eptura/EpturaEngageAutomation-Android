@@ -12,9 +12,9 @@ public class LoginPage extends DriverFactory {
    private final By UserCredentials_Screen=By.id("com.condecosoftware.condeco:id/title");
   // private final By passwordField = By.id("com.client.app:id/password");
    // Fixed: Use more specific locator for Continue button - try ID first, then text-based xpath
-   private final By Continue_btn=By.id("com.condecosoftware.condeco:id/button");
-   private final By Continue_btn_by_text=By.xpath("//android.widget.Button[@text='Continue' or @text='CONTINUE' or contains(@text,'ontinue')]");
-   private final By Continue_btn_by_class=By.className("android.widget.Button");
+   private final By Continue_btn=By.id("com.condecosoftware.condeco:id/buttonContinue");
+  // private final By Continue_btn_by_text=By.xpath("//android.widget.Button[@text='Continue' or @text='CONTINUE' or contains(@text,'ontinue')]");
+ //  private final By Continue_btn_by_class=By.className("android.widget.Button");
    
    private final By Username_id=By.id("com.condecosoftware.condeco:id/username");
    private final By Password_id=By.id("com.condecosoftware.condeco:id/password");
