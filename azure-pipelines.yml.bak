@@ -503,40 +503,11 @@ stages:
             condition: always()
 
           - script: |
-              echo "📊 Collecting test execution reports and screenshots..."
+              echo "📊 Collecting test execution reports..."
               
               # Create reports directory
               REPORTS_DIR="$(Build.SourcesDirectory)/test-reports"
               mkdir -p $REPORTS_DIR
-              
-              # Ensure screenshots directory exists for artifact publishing
-              SCREENSHOTS_DIR="$(Build.SourcesDirectory)/target/screenshots"
-              mkdir -p $SCREENSHOTS_DIR
-              
-              # If no screenshots exist, create a placeholder file to ensure artifact publishing doesn't fail
-              if [ -z "$(ls -A $SCREENSHOTS_DIR 2>/dev/null)" ]; then
-                echo "No test screenshots were captured during this run." > "$SCREENSHOTS_DIR/README.txt"
-                echo "Screenshots are captured after each test case (passed or failed)." >> "$SCREENSHOTS_DIR/README.txt"
-                echo "Timestamp: $(date)" >> "$SCREENSHOTS_DIR/README.txt"
-              fi
-              
-              # Count and list screenshots
-              SCREENSHOT_COUNT=$(find $SCREENSHOTS_DIR -name "*.png" 2>/dev/null | wc -l)
-              echo "📸 Found $SCREENSHOT_COUNT test screenshots"
-              
-              if [ "$SCREENSHOT_COUNT" -gt 0 ]; then
-                echo ""
-                echo "📸 Test Screenshots Summary:"
-                echo "================================"
-                PASSED_COUNT=$(find $SCREENSHOTS_DIR -name "Passed_*.png" 2>/dev/null | wc -l)
-                FAILED_COUNT=$(find $SCREENSHOTS_DIR -name "Failed_*.png" 2>/dev/null | wc -l)
-                echo "✅ PASSED Test Screenshots: $PASSED_COUNT"
-                ls -la $SCREENSHOTS_DIR/Passed_*.png 2>/dev/null | head -20 || true
-                echo ""
-                echo "❌ FAILED Test Screenshots: $FAILED_COUNT"
-                ls -la $SCREENSHOTS_DIR/Failed_*.png 2>/dev/null | head -20 || true
-                echo "================================"
-              fi
               
               # Copy surefire reports
               if [ -d "$(Build.SourcesDirectory)/target/surefire-reports" ]; then
@@ -587,7 +558,7 @@ stages:
               
               echo "📁 Reports directory contents:"
               find $REPORTS_DIR -type f | head -100
-            displayName: 'Collect Test Reports and Screenshots'
+            displayName: 'Collect Test Reports'
             condition: always()
 
           - task: PublishPipelineArtifact@1
@@ -612,7 +583,8 @@ stages:
               targetPath: '$(Build.SourcesDirectory)/target/screenshots'
               artifact: 'TestScreenshots'
               publishLocation: 'pipeline'
-            condition: always()
+            condition: succeededOrFailed()
+            continueOnError: true
 
           - task: PublishTestResults@2
             displayName: 'Publish TestNG Results'
@@ -623,6 +595,4 @@ stages:
               mergeTestResults: true
               failTaskOnFailedTests: false
             condition: always()
-
-
 
