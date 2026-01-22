@@ -106,6 +106,86 @@ public class LoginPage extends DriverFactory {
    }
    
    /**
+    * Clears the credential fields (username and password) to ensure fresh entry
+    * This is important when running multiple login scenarios back-to-back
+    */
+   private void clearCredentialFields() {
+       System.out.println("🧹 Clearing credential fields before entry...");
+       try {
+           // Clear username field
+           WebElement usernameElement = findUsernameField();
+           if (usernameElement != null) {
+               String currentText = usernameElement.getAttribute("text");
+               String showingHint = usernameElement.getAttribute("showing-hint");
+               System.out.println("  Username field - current text: '" + currentText + "', showing-hint: " + showingHint);
+               
+               if (!"true".equals(showingHint) && currentText != null && !currentText.equals("Username") && !currentText.isEmpty()) {
+                   System.out.println("  Clearing username field...");
+                   usernameElement.click();
+                   Thread.sleep(300);
+                   usernameElement.clear();
+                   Thread.sleep(300);
+                   
+                   // Verify it's cleared - use backspace as fallback
+                   String afterClear = usernameElement.getAttribute("text");
+                   if (afterClear != null && !afterClear.equals("Username") && !afterClear.isEmpty() && !"true".equals(usernameElement.getAttribute("showing-hint"))) {
+                       System.out.println("  Clear didn't work, using backspace...");
+                       AndroidDriver androidDriver = (AndroidDriver) driver;
+                       for (int i = 0; i < 50; i++) {
+                           androidDriver.pressKey(new KeyEvent(AndroidKey.DEL));
+                       }
+                       Thread.sleep(300);
+                   }
+                   System.out.println("  ✅ Username field cleared");
+               } else {
+                   System.out.println("  Username field already empty/showing hint");
+               }
+           }
+           
+           // Clear password field
+           WebElement passwordElement = findPasswordField();
+           if (passwordElement != null) {
+               String currentText = passwordElement.getAttribute("text");
+               String showingHint = passwordElement.getAttribute("showing-hint");
+               System.out.println("  Password field - current text: '" + currentText + "', showing-hint: " + showingHint);
+               
+               if (!"true".equals(showingHint) && currentText != null && !currentText.equals("Password") && !currentText.isEmpty()) {
+                   System.out.println("  Clearing password field...");
+                   passwordElement.click();
+                   Thread.sleep(300);
+                   passwordElement.clear();
+                   Thread.sleep(300);
+                   
+                   // Verify it's cleared - use backspace as fallback
+                   String afterClear = passwordElement.getAttribute("text");
+                   if (afterClear != null && !afterClear.equals("Password") && !afterClear.isEmpty() && !"true".equals(passwordElement.getAttribute("showing-hint"))) {
+                       System.out.println("  Clear didn't work, using backspace...");
+                       AndroidDriver androidDriver = (AndroidDriver) driver;
+                       for (int i = 0; i < 50; i++) {
+                           androidDriver.pressKey(new KeyEvent(AndroidKey.DEL));
+                       }
+                       Thread.sleep(300);
+                   }
+                   System.out.println("  ✅ Password field cleared");
+               } else {
+                   System.out.println("  Password field already empty/showing hint");
+               }
+           }
+           
+           // Hide keyboard if open
+           try {
+               driver.hideKeyboard();
+           } catch (Exception e) {
+               // Keyboard not open
+           }
+           
+           System.out.println("🧹 Credential fields clearing completed");
+       } catch (Exception e) {
+           System.out.println("⚠️ Error clearing credential fields: " + e.getMessage());
+       }
+   }
+   
+   /**
     * Check if any username locator is present on screen
     * @param timeoutSeconds timeout for each locator check
     * @return true if any username locator is found
@@ -392,6 +472,10 @@ public class LoginPage extends DriverFactory {
             System.out.println("⏳ Waiting for credentials screen to stabilize...");
             Thread.sleep(3000);
             
+            // Clear any existing credentials from previous test runs
+            clearCredentialFields();
+            Thread.sleep(500);
+            
             // Find username field using multiple locators
             System.out.println("🔘 Attempting to find and click username field...");
             WebElement usernameElement = findUsernameField();
@@ -532,17 +616,67 @@ public class LoginPage extends DriverFactory {
             System.out.println("⏳ Waiting for page to load after login...");
             Thread.sleep(3000); // Initial wait for transition to start
             
+            // Check for any error dialogs or messages that might appear after login attempt
+            System.out.println("🔍 Checking for error messages after login submission...");
+            checkForLoginErrors();
+            
             // Wait for login screen to disappear (username field should not be visible)
-            WebDriverWait postLoginWait = new WebDriverWait(driver, Duration.ofSeconds(60));
-            try {
-                postLoginWait.until(ExpectedConditions.invisibilityOfElementLocated(Username_by_id));
-                System.out.println("✅ Login screen disappeared - page is loading");
-            } catch (Exception waitEx) {
-                System.out.println("⚠️ Username field still visible after login submission");
+            // But also check if credentials were cleared (server rejection)
+            WebDriverWait postLoginWait = new WebDriverWait(driver, Duration.ofSeconds(30));
+            boolean loginSuccessful = false;
+            
+            for (int checkAttempt = 0; checkAttempt < 6; checkAttempt++) {
+                Thread.sleep(5000);
+                
+                // Check if we've transitioned away from login screen
+                if (!isAnyUsernameLocatorPresent(2)) {
+                    System.out.println("✅ Login screen disappeared - login appears successful");
+                    loginSuccessful = true;
+                    break;
+                }
+                
+                // Check if credentials were cleared (server rejection)
+                WebElement usernameCheck = findUsernameField();
+                if (usernameCheck != null) {
+                    String currentText = usernameCheck.getAttribute("text");
+                    String showingHint = usernameCheck.getAttribute("showing-hint");
+                    System.out.println("  Check " + (checkAttempt + 1) + "/6 - Username field text: '" + currentText + "', showing-hint: " + showingHint);
+                    
+                    // If showing hint again, credentials were cleared by the app (server rejection)
+                    if ("true".equals(showingHint) || "Username".equals(currentText)) {
+                        System.out.println("⚠️ Credentials appear to have been cleared by the app!");
+                        System.out.println("⚠️ This usually indicates the server rejected the login credentials.");
+                        
+                        // Check for any error messages
+                        checkForLoginErrors();
+                        
+                        // Check Continue button state
+                        try {
+                            WebElement continueCheck = driver.findElement(Continue_btn);
+                            System.out.println("  Continue button enabled: " + continueCheck.isEnabled());
+                            if (!continueCheck.isEnabled()) {
+                                System.out.println("⚠️ Continue button is disabled - credentials were cleared");
+                            }
+                        } catch (Exception e) {
+                            // Ignore
+                        }
+                        
+                        break;
+                    }
+                }
+                
+                // Check for error messages
+                checkForLoginErrors();
+                
+                System.out.println("  Waiting for login to complete... (" + ((checkAttempt + 1) * 5) + " seconds)");
+            }
+            
+            if (!loginSuccessful) {
+                System.out.println("⚠️ Username field still visible after login submission - login may have failed");
             }
             
             // Additional wait for the home screen to start appearing
-            Thread.sleep(5000); // Allow time for home screen elements to initialize
+            Thread.sleep(3000);
             System.out.println("✅ Page load wait completed, ready for notification handling");
             System.out.println("========================================");
             
@@ -658,6 +792,75 @@ public class LoginPage extends DriverFactory {
         }
     }
     
+   /**
+    * Check for any error messages or dialogs that appear after login attempt
+    */
+   private void checkForLoginErrors() {
+       try {
+           System.out.println("  🔍 Scanning for error messages...");
+           
+           // Check for textinput_error element
+           if (Utility.isElementPresent(textInputErrorOnLogin_id, 2)) {
+               String errorText = Utility.getTextFromid(textInputErrorOnLogin_id, 2);
+               System.out.println("  ⚠️ Found error message: " + errorText);
+           }
+           
+           // Check for snackbar error
+           By snackbarError = By.id("com.condecosoftware.condeco:id/snackbar_text");
+           if (Utility.isElementPresent(snackbarError, 2)) {
+               try {
+                   String snackbarText = driver.findElement(snackbarError).getText();
+                   System.out.println("  ⚠️ Found snackbar message: " + snackbarText);
+               } catch (Exception e) {}
+           }
+           
+           // Check for any dialog with error text
+           By errorDialog = By.xpath("//*[contains(@text, 'error') or contains(@text, 'Error') or contains(@text, 'failed') or contains(@text, 'Failed') or contains(@text, 'invalid') or contains(@text, 'Invalid') or contains(@text, 'unauthorized') or contains(@text, 'Unauthorized') or contains(@text, 'incorrect') or contains(@text, 'Incorrect')]");
+           if (Utility.isElementPresent(errorDialog, 2)) {
+               try {
+                   String errorText = driver.findElement(errorDialog).getText();
+                   System.out.println("  ⚠️ Found error dialog/text: " + errorText);
+               } catch (Exception e) {}
+           }
+           
+           // Check for alert dialog
+           By alertTitle = By.id("android:id/alertTitle");
+           if (Utility.isElementPresent(alertTitle, 1)) {
+               try {
+                   String alertText = driver.findElement(alertTitle).getText();
+                   System.out.println("  ⚠️ Found alert dialog: " + alertText);
+                   
+                   // Try to get the message too
+                   By alertMessage = By.id("android:id/message");
+                   if (Utility.isElementPresent(alertMessage, 1)) {
+                       String messageText = driver.findElement(alertMessage).getText();
+                       System.out.println("  ⚠️ Alert message: " + messageText);
+                   }
+                   
+                   // Dismiss the alert if there's an OK button
+                   By okButton = By.id("android:id/button1");
+                   if (Utility.isElementPresent(okButton, 1)) {
+                       driver.findElement(okButton).click();
+                       System.out.println("  ✅ Dismissed alert dialog");
+                       Thread.sleep(1000);
+                   }
+               } catch (Exception e) {}
+           }
+           
+           // Check for network error indicators
+           By networkError = By.xpath("//*[contains(@text, 'network') or contains(@text, 'Network') or contains(@text, 'connection') or contains(@text, 'Connection') or contains(@text, 'timeout') or contains(@text, 'Timeout')]");
+           if (Utility.isElementPresent(networkError, 1)) {
+               try {
+                   String networkText = driver.findElement(networkError).getText();
+                   System.out.println("  ⚠️ Possible network error: " + networkText);
+               } catch (Exception e) {}
+           }
+           
+       } catch (Exception e) {
+           System.out.println("  Error checking for login errors: " + e.getMessage());
+       }
+   }
+   
    /**
     * Robust text entry method that tries multiple approaches and verifies the text was entered
     * @param element The WebElement to enter text into
