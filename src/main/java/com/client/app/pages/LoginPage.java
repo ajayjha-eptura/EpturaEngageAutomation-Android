@@ -1,4 +1,4 @@
-﻿package com.client.app.pages;
+package com.client.app.pages;
 import appium.webdriver.extensions.DriverFactory;
 import appium.webdriver.extensions.Utility;
 import org.openqa.selenium.By;
