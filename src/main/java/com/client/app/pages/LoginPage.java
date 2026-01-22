@@ -2,26 +2,36 @@ package com.client.app.pages;
 import appium.webdriver.extensions.DriverFactory;
 import appium.webdriver.extensions.Utility;
 import org.openqa.selenium.By;
+import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
+import io.appium.java_client.AppiumBy;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
 
 public class LoginPage extends DriverFactory {
    // Locators
    private final By EpturaURL = By.id("com.condecosoftware.condeco:id/editTextServerUrl");
-   private final By UserCredentials_Screen=By.id("com.condecosoftware.condeco:id/title");
-  // private final By passwordField = By.id("com.client.app:id/password");
-   // Fixed: Use more specific locator for Continue button - try ID first, then text-based xpath
-   private final By Continue_btn=By.id("com.condecosoftware.condeco:id/buttonContinue");
-  // private final By Continue_btn_by_text=By.xpath("//android.widget.Button[@text='Continue' or @text='CONTINUE' or contains(@text,'ontinue')]");
- //  private final By Continue_btn_by_class=By.className("android.widget.Button");
+   private final By UserCredentials_Screen = By.id("com.condecosoftware.condeco:id/title");
+   private final By Continue_btn = By.id("com.condecosoftware.condeco:id/buttonContinue");
    
-   private final By Username_id=By.id("com.condecosoftware.condeco:id/username");
-   private final By Password_id=By.id("com.condecosoftware.condeco:id/password");
-  // private final By LocationPermissionCheck_id = By.id("android:id/alertTitle");
-  // private final By OK_Button_Id= By.id("android:id/button1");
-   // Fixed: Use proper locator for Today page - assuming it has a different identifier when logged in
-   private final By Todaypage_Header = By.id("com.condecosoftware.condeco:id/username");
+   // Multiple locators for Username field - will try each one by one (3 locators)
+   private final By Username_by_id = By.id("com.condecosoftware.condeco:id/username");
+   private final By Username_by_uiautomator = AppiumBy.androidUIAutomator("new UiSelector().resourceId(\"com.condecosoftware.condeco:id/username\")");
+   private final By Username_by_xpath = By.xpath("//android.widget.EditText[@resource-id=\"com.condecosoftware.condeco:id/username\"]");
+   
+   // Multiple locators for Password field - will try each one by one (3 locators)
+   private final By Password_by_id = By.id("com.condecosoftware.condeco:id/password");
+   private final By Password_by_uiautomator = AppiumBy.androidUIAutomator("new UiSelector().resourceId(\"com.condecosoftware.condeco:id/password\")");
+   private final By Password_by_xpath = By.xpath("//android.widget.EditText[@resource-id=\"com.condecosoftware.condeco:id/password\"]");
+   
+   // Default locators (for backward compatibility in other methods)
+   private final By Username_id = By.id("com.condecosoftware.condeco:id/username");
+   private final By Password_id = By.id("com.condecosoftware.condeco:id/password");
+
+   // Home screen locators - use toolbar or navigation elements to detect logged-in state
+   private final By Todaypage_Header = By.xpath("(//android.widget.TextView[@text=\"Today\"])[1]");
    private final By CalendarPage_Header = By.xpath("(//android.widget.TextView[@text=\"Calendar\"])[1]");
    private final By BookPage_Header = By.xpath("(//android.widget.TextView[@text=\"Book\"])[1]");
    private final By YourTeamPage_Header = By.xpath("(//android.widget.TextView[@text=\"Your team\"])[1]");
@@ -29,6 +39,92 @@ public class LoginPage extends DriverFactory {
    private final By Profile_menu_btn = By.xpath("//android.widget.LinearLayout[@content-desc=\"Profile\"]/android.widget.ImageView");
    private final By logout_option = By.id("com.condecosoftware.condeco:id/logout");
    private final By logout_confirm = By.id("com.condecosoftware.condeco:id/core_dlg_positive_button");
+   
+   /**
+    * Helper method to find and return a working username element by trying multiple locators
+    * @return WebElement if found, null if none of the locators work
+    */
+   private WebElement findUsernameField() {
+       List<By> locators = Arrays.asList(
+           Username_by_id,
+           Username_by_uiautomator,
+           Username_by_xpath
+       );
+       
+       System.out.println("🔍 Trying to find username field with multiple locators...");
+       
+       for (int i = 0; i < locators.size(); i++) {
+           By locator = locators.get(i);
+           try {
+               System.out.println("  Attempt " + (i + 1) + "/" + locators.size() + ": " + locator.toString());
+               WebElement element = driver.findElement(locator);
+               if (element != null && element.isDisplayed()) {
+                   System.out.println("  ✅ SUCCESS! Found username field with: " + locator.toString());
+                   return element;
+               }
+           } catch (Exception e) {
+               System.out.println("  ❌ Failed: " + e.getMessage().split("\n")[0]);
+           }
+       }
+       
+       System.out.println("  ❌ All username locators failed!");
+       return null;
+   }
+   
+   /**
+    * Helper method to find and return a working password element by trying multiple locators
+    * @return WebElement if found, null if none of the locators work
+    */
+   private WebElement findPasswordField() {
+       List<By> locators = Arrays.asList(
+           Password_by_id,
+           Password_by_uiautomator,
+           Password_by_xpath
+       );
+       
+       System.out.println("🔍 Trying to find password field with multiple locators...");
+       
+       for (int i = 0; i < locators.size(); i++) {
+           By locator = locators.get(i);
+           try {
+               System.out.println("  Attempt " + (i + 1) + "/" + locators.size() + ": " + locator.toString());
+               WebElement element = driver.findElement(locator);
+               if (element != null && element.isDisplayed()) {
+                   System.out.println("  ✅ SUCCESS! Found password field with: " + locator.toString());
+                   return element;
+               }
+           } catch (Exception e) {
+               System.out.println("  ❌ Failed: " + e.getMessage().split("\n")[0]);
+           }
+       }
+       
+       System.out.println("  ❌ All password locators failed!");
+       return null;
+   }
+   
+   /**
+    * Check if any username locator is present on screen
+    * @param timeoutSeconds timeout for each locator check
+    * @return true if any username locator is found
+    */
+   private boolean isAnyUsernameLocatorPresent(int timeoutSeconds) {
+       List<By> locators = Arrays.asList(
+           Username_by_id,
+           Username_by_uiautomator,
+           Username_by_xpath
+       );
+       
+       for (By locator : locators) {
+           try {
+               if (Utility.isElementPresent(locator, timeoutSeconds)) {
+                   return true;
+               }
+           } catch (Exception e) {
+               // Continue to next locator
+           }
+       }
+       return false;
+   }
   
    // method to ensure user is on login page
    public void ensureLoginPageIsDisplayed() {
@@ -63,7 +159,7 @@ public class LoginPage extends DriverFactory {
                 
                 // After logout, wait for login page
                 Thread.sleep(2000);
-                if (Utility.isElementPresent(EpturaURL, 5) || Utility.isElementPresent(Username_id, 5 )) {
+                if (Utility.isElementPresent(EpturaURL, 5) || isAnyUsernameLocatorPresent(5)) {
                     System.out.println("✅ Logout successful, now on login page");
                     return;
                 }
@@ -87,7 +183,7 @@ public class LoginPage extends DriverFactory {
                     return;
                 }
                 
-                if (Utility.isElementPresent(Username_id, 5)) {
+                if (isAnyUsernameLocatorPresent(5)) {
                     System.out.println("✅ Found username field on login page");
                     return;
                 }
@@ -146,27 +242,21 @@ public class LoginPage extends DriverFactory {
     }
 
    //CUMA-C226538 Perform Login with valid credential
-   public void perform_Forms_Login(String serverName,String userName, String password) throws InterruptedException
-	{
-		try {
-			System.out.println("========================================");
-			System.out.println("Attempting to perform login...");
-			System.out.println("Server: " + serverName + ", Username: " + userName);
-			System.out.println("========================================");
+   public void perform_Forms_Login(String serverName, String userName, String password) throws InterruptedException {
+        try {
+            System.out.println("========================================");
+            System.out.println("Attempting to perform login...");
+            System.out.println("Server: " + serverName + ", Username: " + userName);
+            System.out.println("========================================");
 
             // Give app time to fully load and handle any initial popups
             System.out.println("⏳ Waiting for app to stabilize...");
             Thread.sleep(3000);
-            
-            // Handle any notifications or permission dialogs that might be blocking
-           // System.out.println("🔔 Checking for and dismissing any notifications...");
-          //  Utility.handleAppNotifications();
-           // Thread.sleep(1000);
 
             // Check if we need to enter the URL or if we're already on the username/password screen
             // Use longer timeouts to handle slow loading
             boolean onUrlScreen = Utility.isElementPresent(EpturaURL, 10);
-            boolean onCredentialsScreen = Utility.isElementPresent(Username_id, 10);
+            boolean onCredentialsScreen = isAnyUsernameLocatorPresent(10);
             
             System.out.println("Login flow state check:");
             System.out.println("  - On URL entry screen: " + onUrlScreen);
@@ -177,8 +267,6 @@ public class LoginPage extends DriverFactory {
                 System.out.println("⚠️ Neither login screen detected, attempting recovery...");
                 System.out.println("Current Activity: " + driver.currentActivity());
                 
-                // Handle notifications again in case they appeared
-               // Utility.handleAppNotifications();
                 Thread.sleep(2000);
                 
                 // Retry detection with longer timeout
@@ -186,15 +274,13 @@ public class LoginPage extends DriverFactory {
                     System.out.println("🔄 Retry attempt " + attempt + "/3...");
                     
                     onUrlScreen = Utility.isElementPresent(EpturaURL, 10);
-                    onCredentialsScreen = Utility.isElementPresent(Username_id, 10);
+                    onCredentialsScreen = isAnyUsernameLocatorPresent(10);
                     
                     if (onUrlScreen || onCredentialsScreen) {
                         System.out.println("✅ Login screen detected on retry " + attempt);
                         break;
                     }
                     
-                    // Handle any popups and wait before next retry
-                  //  Utility.handleAppNotifications();
                     Thread.sleep(3000);
                 }
                 
@@ -247,35 +333,40 @@ public class LoginPage extends DriverFactory {
                 System.out.println("Current Activity: " + driver.currentActivity());
                 
                 // First, wait for the URL entry screen to disappear
-                // This is indicated by the EditText field no longer being present
                 System.out.println("Waiting for URL screen to disappear...");
                 Thread.sleep(2000);
                 
                 // Now wait for the username field to appear with a longer timeout
                 System.out.println("Waiting for username field with explicit wait (60 seconds timeout)...");
-                WebDriverWait usernameWait = new WebDriverWait(driver, Duration.ofSeconds(60));
-                try {
-                    usernameWait.until(ExpectedConditions.visibilityOfElementLocated(Username_id));
-                    System.out.println("✅ Username field found - successfully transitioned to credentials screen");
-                } catch (Exception e) {
+                
+                // Wait up to 60 seconds for any username locator to appear
+                boolean usernameFound = false;
+                for (int waitAttempt = 0; waitAttempt < 30; waitAttempt++) {
+                    if (isAnyUsernameLocatorPresent(2)) {
+                        usernameFound = true;
+                        System.out.println("✅ Username field found - successfully transitioned to credentials screen");
+                        break;
+                    }
+                    Thread.sleep(2000);
+                }
+                
+                if (!usernameFound) {
                     System.out.println("⚠️ WARNING: Username field not found after URL submission!");
                     System.out.println("Current Activity: " + driver.currentActivity());
-                    System.out.println("Attempting to find any EditText fields...");
                     
-                    // Check if there are any EditText fields visible (might be on a different screen)
-                    try {
-                        if (Utility.isElementPresent(EpturaURL, 2)) {
-                            System.out.println("Still on URL entry screen - clicking Continue again");
-                            driver.findElement(Continue_btn).click();
-                            Thread.sleep(3000);
-                            usernameWait.until(ExpectedConditions.visibilityOfElementLocated(Username_id));
+                    // Check if still on URL entry screen
+                    if (Utility.isElementPresent(EpturaURL, 2)) {
+                        System.out.println("Still on URL entry screen - clicking Continue again");
+                        driver.findElement(Continue_btn).click();
+                        Thread.sleep(3000);
+                        
+                        if (!isAnyUsernameLocatorPresent(10)) {
+                            System.out.println("Retry failed. Printing page source for debugging:");
+                            System.out.println("========================================");
+                            System.out.println(driver.getPageSource());
+                            System.out.println("========================================");
+                            throw new RuntimeException("Cannot find username field after URL submission.");
                         }
-                    } catch (Exception retryEx) {
-                        System.out.println("Retry failed. Printing page source for debugging:");
-                        System.out.println("========================================");
-                        System.out.println(driver.getPageSource());
-                        System.out.println("========================================");
-                        throw new RuntimeException("Cannot find username field after URL submission. Check page source above.", e);
                     }
                 }
                 
@@ -294,26 +385,82 @@ public class LoginPage extends DriverFactory {
             System.out.println("📝 Entering credentials...");
             System.out.println("========================================");
             
-            // Ensure username field is still visible and interactable
-            WebDriverWait credWait = new WebDriverWait(driver, Duration.ofSeconds(30));
-            credWait.until(ExpectedConditions.visibilityOfElementLocated(Username_id));
-            credWait.until(ExpectedConditions.elementToBeClickable(Username_id));
+            // Give the credentials popup/screen extra time to fully render and become interactive
+            System.out.println("⏳ Waiting for credentials screen to stabilize...");
+            Thread.sleep(3000);
             
-            driver.findElement(Username_id).click();
-            Thread.sleep(500);
-            driver.findElement(Username_id).clear();
-            Thread.sleep(300);
-            driver.findElement(Username_id).sendKeys(userName);
-            System.out.println("✅ Username entered");
+            // Find username field using multiple locators
+            System.out.println("🔘 Attempting to find and click username field...");
+            WebElement usernameElement = findUsernameField();
+            
+            if (usernameElement == null) {
+                System.out.println("❌ ERROR: Could not find username field with any locator!");
+                System.out.println("Page source for debugging:");
+                System.out.println(driver.getPageSource());
+                throw new RuntimeException("Username field not found with any locator");
+            }
+            
+            // Wait for element to be clickable
+            Thread.sleep(1500);
+            
+            // Enter username directly without re-finding the element
+            System.out.println("📝 Clearing and entering username...");
+            try {
+                usernameElement.click();
+                System.out.println("✅ Username field clicked");
+                Thread.sleep(1000);
+                usernameElement.clear();
+                Thread.sleep(500);
+                usernameElement.sendKeys(userName);
+                System.out.println("✅ Username entered: " + userName);
+            } catch (Exception usernameEx) {
+                System.out.println("⚠️ First attempt failed, trying alternative approach...");
+                // If the original element became stale, re-find and try again
+                Thread.sleep(1000);
+                usernameElement = findUsernameField();
+                if (usernameElement == null) {
+                    // Last resort - try using explicit wait
+                    System.out.println("⚠️ Re-find failed, trying with explicit wait...");
+                    WebDriverWait fieldWait = new WebDriverWait(driver, Duration.ofSeconds(15));
+                    try {
+                        usernameElement = fieldWait.until(ExpectedConditions.elementToBeClickable(Username_by_id));
+                    } catch (Exception waitEx) {
+                        try {
+                            usernameElement = fieldWait.until(ExpectedConditions.elementToBeClickable(Username_by_xpath));
+                        } catch (Exception waitEx2) {
+                            System.out.println("❌ ERROR: Could not find username field after multiple retries!");
+                            System.out.println("Page source for debugging:");
+                            System.out.println(driver.getPageSource());
+                            throw new RuntimeException("Could not find username field for text entry after retries");
+                        }
+                    }
+                }
+                usernameElement.click();
+                Thread.sleep(500);
+                usernameElement.clear();
+                Thread.sleep(500);
+                usernameElement.sendKeys(userName);
+                System.out.println("✅ Username entered on retry: " + userName);
+            }
             Thread.sleep(500);
             
-            // Ensure password field is visible
-            credWait.until(ExpectedConditions.visibilityOfElementLocated(Password_id));
-            driver.findElement(Password_id).click();
+            // Find password field using multiple locators
+            System.out.println("🔘 Attempting to find and click password field...");
+            WebElement passwordElement = findPasswordField();
+            
+            if (passwordElement == null) {
+                System.out.println("❌ ERROR: Could not find password field with any locator!");
+                System.out.println("Page source for debugging:");
+                System.out.println(driver.getPageSource());
+                throw new RuntimeException("Password field not found with any locator");
+            }
+            
+            // Click and enter password
+            passwordElement.click();
             Thread.sleep(500);
-            driver.findElement(Password_id).clear();
+            passwordElement.clear();
             Thread.sleep(300);
-            driver.findElement(Password_id).sendKeys(password);
+            passwordElement.sendKeys(password);
             System.out.println("✅ Password entered");
             Thread.sleep(800);
             
@@ -330,7 +477,6 @@ public class LoginPage extends DriverFactory {
             driver.findElement(Continue_btn).click();
             System.out.println("✅ Login credentials submitted successfully");
             System.out.println("========================================");
-            
 
             // Wait for page to load after login submission
             System.out.println("⏳ Waiting for page to load after login...");
@@ -339,7 +485,7 @@ public class LoginPage extends DriverFactory {
             // Wait for login screen to disappear (username field should not be visible)
             WebDriverWait postLoginWait = new WebDriverWait(driver, Duration.ofSeconds(60));
             try {
-                postLoginWait.until(ExpectedConditions.invisibilityOfElementLocated(Username_id));
+                postLoginWait.until(ExpectedConditions.invisibilityOfElementLocated(Username_by_id));
                 System.out.println("✅ Login screen disappeared - page is loading");
             } catch (Exception waitEx) {
                 System.out.println("⚠️ Username field still visible after login submission");
@@ -350,119 +496,115 @@ public class LoginPage extends DriverFactory {
             System.out.println("✅ Page load wait completed, ready for notification handling");
             System.out.println("========================================");
             
-		} catch (Exception e) {
-			System.out.println("========================================");
-			System.out.println("❌ ERROR during login: " + e.getMessage());
-			System.out.println("========================================");
-			e.printStackTrace();
-			throw e;
-		}
-	}
-	
-	public Boolean verify_invalid_login()
-	{
-		System.out.println("========================================");
-		System.out.println("Verifying invalid login - checking for error messages...");
-		System.out.println("========================================");
-		
-		try {
-			// First, check if we're still on the login screen (expected for invalid login)
-			boolean onLoginScreen = Utility.isElementPresent(Username_id, 3) || 
-			                        Utility.isElementPresent(Password_id, 3) ||
-			                        Utility.isElementPresent(EpturaURL, 3);
-			
-			System.out.println("On login screen: " + onLoginScreen);
-			
-			// Try to find the textinput_error element first
-			if (Utility.isElementPresent(textInputErrorOnLogin_id, 30)) {
-				String returnStringMessage = Utility.getTextFromid(textInputErrorOnLogin_id, 10);
-				System.out.println("Found error message: " + returnStringMessage);
-				if(returnStringMessage.contains("You are not authorized to login") || 
-				   returnStringMessage.contains("Please check your user name and password") ||
-				   returnStringMessage.contains("Invalid") ||
-				   returnStringMessage.contains("incorrect") ||
-				   returnStringMessage.contains("failed")) {
-					System.out.println("✅ Authentication error message verified");
-					return true;
-				}
-			}
-			
-			// Alternative: Check for toast messages or dialog with error
-			By toastMessage = By.xpath("//*[contains(@text, 'not authorized') or contains(@text, 'Invalid') or contains(@text, 'incorrect') or contains(@text, 'failed') or contains(@text, 'error')]");
-			if (Utility.isElementPresent(toastMessage, 5)) {
-				System.out.println("✅ Found error toast/dialog message");
-				return true;
-			}
-			
-			// Alternative: Check for snackbar error
-			By snackbarError = By.id("com.condecosoftware.condeco:id/snackbar_text");
-			if (Utility.isElementPresent(snackbarError, 5)) {
-				String snackbarText = Utility.getTextFromid(snackbarError, 3);
-				System.out.println("Found snackbar message: " + snackbarText);
-				return true;
-			}
-			
-			// If we're still on login screen after submission, that also indicates login failed
-			if (onLoginScreen) {
-				System.out.println("✅ Still on login screen after submission - login was rejected");
-				return true;
-			}
-			
-			System.out.println("❌ Could not verify invalid login - no error message found and not on login screen");
-			// Print page source for debugging
-			System.out.println("Current page source:");
-			System.out.println(DriverFactory.getDriver().getPageSource());
-			return false;
-			
-		} catch (Exception e) {
-			System.out.println("Error during invalid login verification: " + e.getMessage());
-			return false;
-		}
-	}
-	
-	public void verify_Valid_Login()
-	{
-		System.out.println("========================================");
-		System.out.println("Verifying successful login...");
-		System.out.println("========================================");
-		
-		Utility.handleAppNotifications();
-		try {
-			// Wait for the app to settle after login
-			Thread.sleep(3000);
-			
-			// Check for home screen indicators (positive verification)
-			boolean onHomeScreen = false;
-			
-			// Check for various home screen elements
-			if (Utility.isElementPresent(Todaypage_Header, 5)) {
-				System.out.println("✅ Found  Today page header - user is logged in and is on Today page");
-				onHomeScreen = true;
-			
-			}
-			
-			// Also verify we're NOT on login screen anymore
-			boolean notOnLoginScreen = !Utility.isElementPresent(EpturaURL, 2) && 
-			                           !Utility.isElementPresent(Password_id, 2);
-			
-			System.out.println("On home screen: " + onHomeScreen);
-			System.out.println("Not on login screen: " + notOnLoginScreen);
-			
-			if (onHomeScreen || notOnLoginScreen) {
-				System.out.println("✅ User successfully logged in");
-			} else {
-				System.out.println("❌ Login verification failed");
-				System.out.println("Current activity: " + driver.currentActivity());
-				System.out.println("Page source:");
-				System.out.println(driver.getPageSource());
-				throw new AssertionError("Login appears to have failed - still on login screen");
-			}
-		} catch (AssertionError e) {
-			throw e;
-		} catch (Exception e) {
-			System.out.println("Login verification failed: " + e.getMessage());
-			throw new AssertionError("Login verification failed: " + e.getMessage());
-		}
-	}
-
-	}
+        } catch (Exception e) {
+            System.out.println("========================================");
+            System.out.println("❌ ERROR during login: " + e.getMessage());
+            System.out.println("========================================");
+            e.printStackTrace();
+            throw e;
+        }
+    }
+    
+    public Boolean verify_invalid_login() {
+        System.out.println("========================================");
+        System.out.println("Verifying invalid login - checking for error messages...");
+        System.out.println("========================================");
+        
+        try {
+            // First, check if we're still on the login screen (expected for invalid login)
+            boolean onLoginScreen = isAnyUsernameLocatorPresent(3) || 
+                                    Utility.isElementPresent(Password_by_id, 3) ||
+                                    Utility.isElementPresent(EpturaURL, 3);
+            
+            System.out.println("On login screen: " + onLoginScreen);
+            
+            // Try to find the textinput_error element first
+            if (Utility.isElementPresent(textInputErrorOnLogin_id, 30)) {
+                String returnStringMessage = Utility.getTextFromid(textInputErrorOnLogin_id, 10);
+                System.out.println("Found error message: " + returnStringMessage);
+                if(returnStringMessage.contains("You are not authorized to login") || 
+                   returnStringMessage.contains("Please check your user name and password") ||
+                   returnStringMessage.contains("Invalid") ||
+                   returnStringMessage.contains("incorrect") ||
+                   returnStringMessage.contains("failed")) {
+                    System.out.println("✅ Authentication error message verified");
+                    return true;
+                }
+            }
+            
+            // Alternative: Check for toast messages or dialog with error
+            By toastMessage = By.xpath("//*[contains(@text, 'not authorized') or contains(@text, 'Invalid') or contains(@text, 'incorrect') or contains(@text, 'failed') or contains(@text, 'error')]");
+            if (Utility.isElementPresent(toastMessage, 5)) {
+                System.out.println("✅ Found error toast/dialog message");
+                return true;
+            }
+            
+            // Alternative: Check for snackbar error
+            By snackbarError = By.id("com.condecosoftware.condeco:id/snackbar_text");
+            if (Utility.isElementPresent(snackbarError, 5)) {
+                String snackbarText = Utility.getTextFromid(snackbarError, 3);
+                System.out.println("Found snackbar message: " + snackbarText);
+                return true;
+            }
+            
+            // If we're still on login screen after submission, that also indicates login failed
+            if (onLoginScreen) {
+                System.out.println("✅ Still on login screen after submission - login was rejected");
+                return true;
+            }
+            
+            System.out.println("❌ Could not verify invalid login - no error message found and not on login screen");
+            // Print page source for debugging
+            System.out.println("Current page source:");
+            System.out.println(DriverFactory.getDriver().getPageSource());
+            return false;
+            
+        } catch (Exception e) {
+            System.out.println("Error during invalid login verification: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    public void verify_Valid_Login() {
+        System.out.println("========================================");
+        System.out.println("Verifying successful login...");
+        System.out.println("========================================");
+        
+        Utility.handleAppNotifications();
+        try {
+            // Wait for the app to settle after login
+            Thread.sleep(3000);
+            
+            // Check for home screen indicators (positive verification)
+            boolean onHomeScreen = false;
+            
+            // Check for various home screen elements
+            if (Utility.isElementPresent(Todaypage_Header, 5)) {
+                System.out.println("✅ Found Today page header - user is logged in and is on Today page");
+                onHomeScreen = true;
+            }
+            
+            // Also verify we're NOT on login screen anymore
+            boolean notOnLoginScreen = !Utility.isElementPresent(EpturaURL, 2) && 
+                                       !Utility.isElementPresent(Password_by_id, 2);
+            
+            System.out.println("On home screen: " + onHomeScreen);
+            System.out.println("Not on login screen: " + notOnLoginScreen);
+            
+            if (onHomeScreen || notOnLoginScreen) {
+                System.out.println("✅ User successfully logged in");
+            } else {
+                System.out.println("❌ Login verification failed");
+                System.out.println("Current activity: " + driver.currentActivity());
+                System.out.println("Page source:");
+                System.out.println(driver.getPageSource());
+                throw new AssertionError("Login appears to have failed - still on login screen");
+            }
+        } catch (AssertionError e) {
+            throw e;
+        } catch (Exception e) {
+            System.out.println("Login verification failed: " + e.getMessage());
+            throw new AssertionError("Login verification failed: " + e.getMessage());
+        }
+    }
+}
