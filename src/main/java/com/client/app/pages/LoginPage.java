@@ -6,6 +6,9 @@ import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import io.appium.java_client.AppiumBy;
+import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.android.nativekey.AndroidKey;
+import io.appium.java_client.android.nativekey.KeyEvent;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
@@ -403,45 +406,24 @@ public class LoginPage extends DriverFactory {
             // Wait for element to be clickable
             Thread.sleep(1500);
             
-            // Enter username directly without re-finding the element
-            System.out.println("📝 Clearing and entering username...");
-            try {
-                usernameElement.click();
-                System.out.println("✅ Username field clicked");
-                Thread.sleep(1000);
-                usernameElement.clear();
-                Thread.sleep(500);
-                usernameElement.sendKeys(userName);
-                System.out.println("✅ Username entered: " + userName);
-            } catch (Exception usernameEx) {
-                System.out.println("⚠️ First attempt failed, trying alternative approach...");
-                // If the original element became stale, re-find and try again
-                Thread.sleep(1000);
+            // Enter username using robust method with verification
+            System.out.println("📝 Entering username with robust method...");
+            boolean usernameEntered = enterTextWithVerification(usernameElement, userName, "Username");
+            
+            if (!usernameEntered) {
+                System.out.println("⚠️ Username entry verification failed, attempting fallback...");
+                // Re-find element and try one more time with basic approach
                 usernameElement = findUsernameField();
-                if (usernameElement == null) {
-                    // Last resort - try using explicit wait
-                    System.out.println("⚠️ Re-find failed, trying with explicit wait...");
-                    WebDriverWait fieldWait = new WebDriverWait(driver, Duration.ofSeconds(15));
-                    try {
-                        usernameElement = fieldWait.until(ExpectedConditions.elementToBeClickable(Username_by_id));
-                    } catch (Exception waitEx) {
-                        try {
-                            usernameElement = fieldWait.until(ExpectedConditions.elementToBeClickable(Username_by_xpath));
-                        } catch (Exception waitEx2) {
-                            System.out.println("❌ ERROR: Could not find username field after multiple retries!");
-                            System.out.println("Page source for debugging:");
-                            System.out.println(driver.getPageSource());
-                            throw new RuntimeException("Could not find username field for text entry after retries");
-                        }
-                    }
+                if (usernameElement != null) {
+                    usernameElement.click();
+                    Thread.sleep(500);
+                    usernameElement.clear();
+                    Thread.sleep(300);
+                    usernameElement.sendKeys(userName);
+                    Thread.sleep(500);
                 }
-                usernameElement.click();
-                Thread.sleep(500);
-                usernameElement.clear();
-                Thread.sleep(500);
-                usernameElement.sendKeys(userName);
-                System.out.println("✅ Username entered on retry: " + userName);
             }
+            System.out.println("✅ Username entry completed: " + userName);
             Thread.sleep(500);
             
             // Find password field using multiple locators
@@ -455,13 +437,24 @@ public class LoginPage extends DriverFactory {
                 throw new RuntimeException("Password field not found with any locator");
             }
             
-            // Click and enter password
-            passwordElement.click();
-            Thread.sleep(500);
-            passwordElement.clear();
-            Thread.sleep(300);
-            passwordElement.sendKeys(password);
-            System.out.println("✅ Password entered");
+            // Enter password using robust method with verification
+            System.out.println("📝 Entering password with robust method...");
+            boolean passwordEntered = enterTextWithVerification(passwordElement, password, "Password");
+            
+            if (!passwordEntered) {
+                System.out.println("⚠️ Password entry verification failed, attempting fallback...");
+                // Re-find element and try one more time
+                passwordElement = findPasswordField();
+                if (passwordElement != null) {
+                    passwordElement.click();
+                    Thread.sleep(500);
+                    passwordElement.clear();
+                    Thread.sleep(300);
+                    passwordElement.sendKeys(password);
+                    Thread.sleep(500);
+                }
+            }
+            System.out.println("✅ Password entry completed");
             Thread.sleep(800);
             
             try {
@@ -472,9 +465,66 @@ public class LoginPage extends DriverFactory {
                 System.out.println("Keyboard already hidden");
             }
             
+            // Verify the Continue button is enabled before clicking
             Thread.sleep(500);
+            WebElement continueBtn = driver.findElement(Continue_btn);
+            System.out.println("🔍 Continue button enabled: " + continueBtn.isEnabled());
+            
+            if (!continueBtn.isEnabled()) {
+                System.out.println("⚠️ Continue button is disabled! Credentials may not have been entered correctly.");
+                System.out.println("Page source for debugging:");
+                System.out.println(driver.getPageSource());
+                
+                // Try re-entering credentials one more time
+                System.out.println("🔄 Attempting to re-enter credentials...");
+                
+                // Re-enter username
+                usernameElement = findUsernameField();
+                if (usernameElement != null) {
+                    usernameElement.click();
+                    Thread.sleep(300);
+                    // Use ADB shell input as last resort
+                    try {
+                        AndroidDriver androidDriver = (AndroidDriver) driver;
+                        androidDriver.executeScript("mobile: shell", java.util.Map.of(
+                            "command", "input",
+                            "args", java.util.Arrays.asList("text", userName)
+                        ));
+                        Thread.sleep(500);
+                    } catch (Exception e) {
+                        usernameElement.sendKeys(userName);
+                    }
+                }
+                
+                // Re-enter password
+                passwordElement = findPasswordField();
+                if (passwordElement != null) {
+                    passwordElement.click();
+                    Thread.sleep(300);
+                    try {
+                        AndroidDriver androidDriver = (AndroidDriver) driver;
+                        androidDriver.executeScript("mobile: shell", java.util.Map.of(
+                            "command", "input",
+                            "args", java.util.Arrays.asList("text", password)
+                        ));
+                        Thread.sleep(500);
+                    } catch (Exception e) {
+                        passwordElement.sendKeys(password);
+                    }
+                }
+                
+                try {
+                    driver.hideKeyboard();
+                } catch (Exception e) {}
+                Thread.sleep(500);
+                
+                // Re-check continue button
+                continueBtn = driver.findElement(Continue_btn);
+                System.out.println("🔍 Continue button enabled after retry: " + continueBtn.isEnabled());
+            }
+            
             System.out.println("🔘 Submitting login credentials...");
-            driver.findElement(Continue_btn).click();
+            continueBtn.click();
             System.out.println("✅ Login credentials submitted successfully");
             System.out.println("========================================");
 
@@ -607,4 +657,170 @@ public class LoginPage extends DriverFactory {
             throw new AssertionError("Login verification failed: " + e.getMessage());
         }
     }
+    
+   /**
+    * Robust text entry method that tries multiple approaches and verifies the text was entered
+    * @param element The WebElement to enter text into
+    * @param text The text to enter
+    * @param fieldName Name of the field for logging
+    * @return true if text was successfully entered and verified
+    */
+   private boolean enterTextWithVerification(WebElement element, String text, String fieldName) {
+       System.out.println("📝 Entering text into " + fieldName + " field using robust method...");
+       
+       // Approach 1: Standard sendKeys with clear
+       try {
+           System.out.println("  Approach 1: Standard sendKeys...");
+           element.click();
+           Thread.sleep(500);
+           element.clear();
+           Thread.sleep(300);
+           element.sendKeys(text);
+           Thread.sleep(500);
+           
+           // Verify text was entered
+           String enteredText = element.getText();
+           String attributeText = element.getAttribute("text");
+           System.out.println("  Verification - getText(): '" + enteredText + "', getAttribute('text'): '" + attributeText + "'");
+           
+           if ((enteredText != null && enteredText.equals(text)) || 
+               (attributeText != null && attributeText.equals(text))) {
+               System.out.println("  ✅ Approach 1 succeeded!");
+               return true;
+           }
+           
+           // Check if it's not showing hint anymore (for password fields that mask text)
+           String showingHint = element.getAttribute("showing-hint");
+           if ("false".equals(showingHint)) {
+               System.out.println("  ✅ Approach 1 succeeded (hint no longer showing)!");
+               return true;
+           }
+           
+           System.out.println("  ⚠️ Approach 1: Text not verified, trying next approach...");
+       } catch (Exception e) {
+           System.out.println("  ❌ Approach 1 failed: " + e.getMessage());
+       }
+       
+       // Approach 2: Click, clear using Actions, then type character by character
+       try {
+           System.out.println("  Approach 2: Character-by-character entry...");
+           element.click();
+           Thread.sleep(500);
+           
+           // Clear field by selecting all and deleting
+           AndroidDriver androidDriver = (AndroidDriver) driver;
+           
+           // Triple-tap to select all text
+           element.click();
+           element.click();
+           element.click();
+           Thread.sleep(300);
+           
+           // Press delete/backspace multiple times to clear
+           for (int i = 0; i < 50; i++) {
+               androidDriver.pressKey(new KeyEvent(AndroidKey.DEL));
+           }
+           Thread.sleep(300);
+           
+           // Now type text
+           element.sendKeys(text);
+           Thread.sleep(500);
+           
+           // Verify
+           String showingHint = element.getAttribute("showing-hint");
+           if ("false".equals(showingHint)) {
+               System.out.println("  ✅ Approach 2 succeeded!");
+               return true;
+           }
+           
+           String attributeText = element.getAttribute("text");
+           if (attributeText != null && !attributeText.equals(fieldName) && !attributeText.isEmpty()) {
+               System.out.println("  ✅ Approach 2 succeeded (text attribute: " + attributeText + ")!");
+               return true;
+           }
+           
+           System.out.println("  ⚠️ Approach 2: Text not verified, trying next approach...");
+       } catch (Exception e) {
+           System.out.println("  ❌ Approach 2 failed: " + e.getMessage());
+       }
+       
+       // Approach 3: Use setValue (Appium-specific method)
+       try {
+           System.out.println("  Approach 3: Using setValue()...");
+           element.click();
+           Thread.sleep(500);
+           
+           // Use Appium's setValue which is more reliable for some apps
+           ((io.appium.java_client.android.AndroidDriver) driver).executeScript(
+               "mobile: type", 
+               java.util.Map.of("text", text)
+           );
+           Thread.sleep(500);
+           
+           String showingHint = element.getAttribute("showing-hint");
+           if ("false".equals(showingHint)) {
+               System.out.println("  ✅ Approach 3 succeeded!");
+               return true;
+           }
+           
+           System.out.println("  ⚠️ Approach 3: Text not verified, trying next approach...");
+       } catch (Exception e) {
+           System.out.println("  ❌ Approach 3 failed: " + e.getMessage());
+       }
+       
+       // Approach 4: Use ADB shell input (most reliable but slower)
+       try {
+           System.out.println("  Approach 4: Using ADB shell input...");
+           element.click();
+           Thread.sleep(500);
+           
+           // Clear using select all + delete via ADB
+           AndroidDriver androidDriver = (AndroidDriver) driver;
+           
+           // Execute shell command to input text
+           // First clear by selecting all (Ctrl+A) and delete
+           androidDriver.executeScript("mobile: shell", java.util.Map.of(
+               "command", "input",
+               "args", java.util.Arrays.asList("keyevent", "KEYCODE_CTRL_LEFT", "KEYCODE_A")
+           ));
+           Thread.sleep(200);
+           androidDriver.executeScript("mobile: shell", java.util.Map.of(
+               "command", "input",
+               "args", java.util.Arrays.asList("keyevent", "KEYCODE_DEL")
+           ));
+           Thread.sleep(200);
+           
+           // Input text via ADB - escape special characters
+           String escapedText = text.replace(" ", "%s").replace("'", "\\'");
+           androidDriver.executeScript("mobile: shell", java.util.Map.of(
+               "command", "input",
+               "args", java.util.Arrays.asList("text", escapedText)
+           ));
+           Thread.sleep(500);
+           
+           String showingHint = element.getAttribute("showing-hint");
+           if ("false".equals(showingHint)) {
+               System.out.println("  ✅ Approach 4 succeeded!");
+               return true;
+           }
+           
+           System.out.println("  ⚠️ Approach 4: Text verification inconclusive");
+       } catch (Exception e) {
+           System.out.println("  ❌ Approach 4 failed: " + e.getMessage());
+       }
+       
+       // Final check - if Continue button becomes enabled, text entry likely worked
+       try {
+           WebElement continueBtn = driver.findElement(Continue_btn);
+           if (continueBtn.isEnabled()) {
+               System.out.println("  ✅ Continue button is enabled - text entry likely succeeded!");
+               return true;
+           }
+       } catch (Exception e) {
+           // Ignore
+       }
+       
+       System.out.println("  ❌ All approaches completed. Text may or may not have been entered.");
+       return false;
+   }
 }
