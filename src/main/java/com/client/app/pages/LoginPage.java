@@ -1,4 +1,5 @@
 package com.client.app.pages;
+
 import appium.webdriver.extensions.DriverFactory;
 import appium.webdriver.extensions.Utility;
 import org.openqa.selenium.By;
@@ -110,14 +111,14 @@ public class LoginPage extends DriverFactory {
     * This is important when running multiple login scenarios back-to-back
     */
    private void clearCredentialFields() {
-       System.out.println("ðŸ§¹ Clearing credential fields before entry...");
+       System.out.println("🧹 Clearing credential fields before entry...");
        try {
            // Clear username field
            WebElement usernameElement = findUsernameField();
            if (usernameElement != null) {
                String currentText = usernameElement.getAttribute("text");
-               String showingHint = usernameElement.getAttribute("showing-hint");
-               System.out.println("  Username field - current text: '" + currentText + "', showing-hint: " + showingHint);
+               String showingHint = usernameElement.getAttribute("showingHintText");
+               System.out.println("  Username field - current text: '" + currentText + "', showingHintText: " + showingHint);
                
                if (!"true".equals(showingHint) && currentText != null && !currentText.equals("Username") && !currentText.isEmpty()) {
                    System.out.println("  Clearing username field...");
@@ -128,7 +129,7 @@ public class LoginPage extends DriverFactory {
                    
                    // Verify it's cleared - use backspace as fallback
                    String afterClear = usernameElement.getAttribute("text");
-                   if (afterClear != null && !afterClear.equals("Username") && !afterClear.isEmpty() && !"true".equals(usernameElement.getAttribute("showing-hint"))) {
+                   if (afterClear != null && !afterClear.equals("Username") && !afterClear.isEmpty() && !"true".equals(usernameElement.getAttribute("showingHintText"))) {
                        System.out.println("  Clear didn't work, using backspace...");
                        AndroidDriver androidDriver = (AndroidDriver) driver;
                        for (int i = 0; i < 50; i++) {
@@ -146,8 +147,8 @@ public class LoginPage extends DriverFactory {
            WebElement passwordElement = findPasswordField();
            if (passwordElement != null) {
                String currentText = passwordElement.getAttribute("text");
-               String showingHint = passwordElement.getAttribute("showing-hint");
-               System.out.println("  Password field - current text: '" + currentText + "', showing-hint: " + showingHint);
+               String showingHint = passwordElement.getAttribute("showingHintText");
+               System.out.println("  Password field - current text: '" + currentText + "', showingHintText: " + showingHint);
                
                if (!"true".equals(showingHint) && currentText != null && !currentText.equals("Password") && !currentText.isEmpty()) {
                    System.out.println("  Clearing password field...");
@@ -158,7 +159,7 @@ public class LoginPage extends DriverFactory {
                    
                    // Verify it's cleared - use backspace as fallback
                    String afterClear = passwordElement.getAttribute("text");
-                   if (afterClear != null && !afterClear.equals("Password") && !afterClear.isEmpty() && !"true".equals(passwordElement.getAttribute("showing-hint"))) {
+                   if (afterClear != null && !afterClear.equals("Password") && !afterClear.isEmpty() && !"true".equals(passwordElement.getAttribute("showingHintText"))) {
                        System.out.println("  Clear didn't work, using backspace...");
                        AndroidDriver androidDriver = (AndroidDriver) driver;
                        for (int i = 0; i < 50; i++) {
@@ -629,7 +630,7 @@ public class LoginPage extends DriverFactory {
                 WebElement usernameCheck = findUsernameField();
                 if (usernameCheck != null) {
                     String currentText = usernameCheck.getAttribute("text");
-                    String showingHint = usernameCheck.getAttribute("showing-hint");
+                    String showingHint = usernameCheck.getAttribute("showingHintText");
                     System.out.println("  Check " + (checkAttempt + 1) + "/6 - Username field text: '" + currentText + "', showing-hint: " + showingHint);
                     
                     // If showing hint again, credentials were cleared by the app (server rejection)
