@@ -44,6 +44,11 @@ public class LoginPage extends DriverFactory {
    private final By logout_option = By.id("com.condecosoftware.condeco:id/logout");
    private final By logout_confirm = By.id("com.condecosoftware.condeco:id/core_dlg_positive_button");
    
+   // ANR (Application Not Responding) dialog locators
+   private final By ANR_Dialog_Title = By.id("android:id/alertTitle");
+   private final By ANR_Wait_Button = By.id("android:id/aerr_wait");
+   private final By ANR_Close_Button = By.id("android:id/aerr_close");
+   
    /**
     * Helper method to find and return a working username element by trying multiple locators
     * @return WebElement if found, null if none of the locators work
@@ -221,6 +226,9 @@ public class LoginPage extends DriverFactory {
             // Give app time to settle after launch
             Thread.sleep(3000);
             
+            // First, check for and handle any ANR (Application Not Responding) dialogs
+            handleANRDialog();
+            
             // First, check if we're already on the login page (URL entry or credentials screen)
             boolean onUrlScreen = Utility.isElementPresent(EpturaURL, 5);
             boolean onCredentialsScreen = Utility.isElementPresent(UserCredentials_Screen, 10);
@@ -257,10 +265,16 @@ public class LoginPage extends DriverFactory {
             System.out.println("Waiting for app to initialize after restart...");
             Thread.sleep(5000);
             
+            // Check for ANR dialog again after restart
+            handleANRDialog();
+            
             // Check again for login page elements with increased timeout
             System.out.println("Checking for login page elements after restart...");
             for (int i = 0; i < 3; i++) {
                 System.out.println("Attempt " + (i + 1) + " - Current Activity: " + driver.currentActivity());
+                
+                // Check for ANR dialog in each iteration
+                handleANRDialog();
                 
                 if (Utility.isElementPresent(EpturaURL, 5)) {
                     System.out.println("[OK] Found URL entry field on login page");
@@ -1111,5 +1125,42 @@ public class LoginPage extends DriverFactory {
        long elapsedSeconds = (System.currentTimeMillis() - startTime) / 1000;
        System.out.println("  Credentials dialog not found after " + elapsedSeconds + " seconds");
        return false;
+   }
+   
+   /**
+    * Handle the Android ANR (Application Not Responding) dialog if it appears
+    */
+   public void handleANRDialog() {
+       try {
+           System.out.println("Checking for ANR (Application Not Responding) dialog...");
+           
+           // Check if the ANR dialog title is present
+           if (Utility.isElementPresent(ANR_Dialog_Title, 5)) {
+               System.out.println("ANR dialog detected - taking appropriate action");
+               
+               // Click the "Wait" button if available
+               if (Utility.isElementPresent(ANR_Wait_Button, 2)) {
+                   driver.findElement(ANR_Wait_Button).click();
+                   System.out.println("Clicked 'Wait' button on ANR dialog");
+                   Thread.sleep(2000);
+               } 
+               
+               // Alternatively, click the "Close" button if "Wait" is not available
+               else if (Utility.isElementPresent(ANR_Close_Button, 2)) {
+                   driver.findElement(ANR_Close_Button).click();
+                   System.out.println("Clicked 'Close' button on ANR dialog");
+                   Thread.sleep(2000);
+               } 
+               
+               // If neither button is available, print a warning
+               else {
+                   System.out.println("[WARN] ANR dialog detected but no action taken - buttons not found");
+               }
+           } else {
+               System.out.println("No ANR dialog detected");
+           }
+       } catch (Exception e) {
+           System.out.println("Error handling ANR dialog: " + e.getMessage());
+       }
    }
 }
