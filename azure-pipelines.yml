@@ -33,6 +33,14 @@ variables:
   # AZURE_SAS_TOKEN: Configure this as a SECRET variable in Azure DevOps Pipeline Variables
   APK_BLOB_NAME: 'Engage/Android/EpturaEngage.apk'
   APK_LOCAL_PATH: '$(Build.SourcesDirectory)/EpturaEngage.apk'
+  # Emulator Configuration - API 36 with custom resolution
+  EMULATOR_API_LEVEL: '36'
+  EMULATOR_SYSTEM_IMAGE: 'system-images;android-36;google_apis_playstore;x86_64'
+  EMULATOR_RESOLUTION_WIDTH: '1080'
+  EMULATOR_RESOLUTION_HEIGHT: '2400'
+  EMULATOR_DENSITY: '420'
+  EMULATOR_RAM: '4096'
+  EMULATOR_CORES: '4'
 
 stages:
   - stage: Setup
@@ -72,10 +80,10 @@ stages:
               mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
               export PATH=$(ANDROID_HOME)/cmdline-tools/latest/bin:$(ANDROID_HOME)/platform-tools:$(ANDROID_HOME)/emulator:$PATH
               yes | sdkmanager --licenses || true
-              # Using google_apis_playstore instead of google_apis to avoid root detection
-              # Play Store images are non-rooted and production-like
-              sdkmanager "platform-tools" "platforms;android-30" "emulator" "build-tools;30.0.3" "system-images;android-30;google_apis_playstore;x86_64"
-              echo "✅ Android SDK installed"
+              # Install API 36 with Play Store image (non-rooted, x86_64)
+              echo "📦 Installing Android API $(EMULATOR_API_LEVEL) system image..."
+              sdkmanager "platform-tools" "platforms;android-$(EMULATOR_API_LEVEL)" "emulator" "build-tools;$(EMULATOR_API_LEVEL).0.0" "$(EMULATOR_SYSTEM_IMAGE)"
+              echo "✅ Android SDK installed with API $(EMULATOR_API_LEVEL)"
             displayName: 'Install Android SDK'
 
           - script: |
@@ -178,7 +186,7 @@ stages:
 
           - script: |
               set -e
-              echo "📦 Installing Android SDK..."
+              echo "📦 Installing Android SDK with API $(EMULATOR_API_LEVEL)..."
               mkdir -p $(ANDROID_HOME)
               cd $(ANDROID_HOME)
               wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
@@ -187,38 +195,71 @@ stages:
               mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
               export PATH=$(ANDROID_HOME)/cmdline-tools/latest/bin:$(ANDROID_HOME)/platform-tools:$(ANDROID_HOME)/emulator:$PATH
               yes | sdkmanager --licenses || true
-              # Using google_apis_playstore instead of google_apis to avoid root detection
-              # Play Store images are non-rooted and production-like
-              sdkmanager "platform-tools" "platforms;android-30" "emulator" "build-tools;30.0.3" "system-images;android-30;google_apis_playstore;x86_64"
-              echo "✅ Android SDK installed"
+              # Install API 36 with Play Store image (non-rooted, x86_64)
+              echo "📦 Installing Android API $(EMULATOR_API_LEVEL) system image (x86_64)..."
+              sdkmanager "platform-tools" "platforms;android-$(EMULATOR_API_LEVEL)" "emulator" "build-tools;$(EMULATOR_API_LEVEL).0.0" "$(EMULATOR_SYSTEM_IMAGE)"
+              echo "✅ Android SDK installed with API $(EMULATOR_API_LEVEL)"
             displayName: 'Install Android SDK'
 
           - script: |
               set -e
-              echo "📱 Creating Android Emulator..."
+              echo "📱 Creating Android Emulator with API $(EMULATOR_API_LEVEL)..."
+              echo "   Resolution: $(EMULATOR_RESOLUTION_WIDTH)x$(EMULATOR_RESOLUTION_HEIGHT)"
+              echo "   Density: $(EMULATOR_DENSITY) dpi"
+              echo "   RAM: $(EMULATOR_RAM) MB"
+              echo "   CPU Cores: $(EMULATOR_CORES)"
+              
               export PATH=$(ANDROID_HOME)/cmdline-tools/latest/bin:$(ANDROID_HOME)/platform-tools:$(ANDROID_HOME)/emulator:$PATH
               export ANDROID_HOME=$(ANDROID_HOME)
               export ANDROID_SDK_ROOT=$(ANDROID_HOME)
               
-              # Create AVD using Play Store image (non-rooted)
-              echo "no" | avdmanager create avd -n test_emulator -k "system-images;android-30;google_apis_playstore;x86_64" -d pixel_4 --force
+              # Create AVD using API 36 Play Store image (non-rooted, x86_64)
+              echo "no" | avdmanager create avd -n test_emulator -k "$(EMULATOR_SYSTEM_IMAGE)" -d pixel_6 --force
               
-              # Configure AVD with proper screen settings for Pixel 4
+              # Configure AVD with exact screen settings matching the requirements
               AVD_DIR="$HOME/.android/avd/test_emulator.avd"
               if [ -f "$AVD_DIR/config.ini" ]; then
-                echo "📝 Configuring AVD screen settings..."
-                echo "hw.lcd.density=440" >> "$AVD_DIR/config.ini"
-                echo "hw.lcd.width=1080" >> "$AVD_DIR/config.ini"
-                echo "hw.lcd.height=2280" >> "$AVD_DIR/config.ini"
+                echo "📝 Configuring AVD with custom screen settings..."
+                
+                # Screen configuration - 1080x2400 @ 420dpi (412x915 dp)
+                echo "hw.lcd.density=$(EMULATOR_DENSITY)" >> "$AVD_DIR/config.ini"
+                echo "hw.lcd.width=$(EMULATOR_RESOLUTION_WIDTH)" >> "$AVD_DIR/config.ini"
+                echo "hw.lcd.height=$(EMULATOR_RESOLUTION_HEIGHT)" >> "$AVD_DIR/config.ini"
+                
+                # Performance settings - Increased RAM and CPU
+                echo "hw.ramSize=$(EMULATOR_RAM)" >> "$AVD_DIR/config.ini"
+                echo "hw.cpu.ncore=$(EMULATOR_CORES)" >> "$AVD_DIR/config.ini"
+                echo "vm.heapSize=576" >> "$AVD_DIR/config.ini"
+                
+                # Hardware acceleration and GPU
+                echo "hw.gpu.enabled=yes" >> "$AVD_DIR/config.ini"
+                echo "hw.gpu.mode=swiftshader_indirect" >> "$AVD_DIR/config.ini"
+                
+                # Keyboard and input
                 echo "hw.keyboard=yes" >> "$AVD_DIR/config.ini"
+                echo "hw.mainKeys=no" >> "$AVD_DIR/config.ini"
+                
+                # Additional optimizations for CI
+                echo "disk.dataPartition.size=4096M" >> "$AVD_DIR/config.ini"
+                echo "fastboot.forceColdBoot=no" >> "$AVD_DIR/config.ini"
+                echo "fastboot.forceFastBoot=yes" >> "$AVD_DIR/config.ini"
+                
+                echo "✅ AVD configuration updated"
+                echo "📋 AVD Config contents:"
+                cat "$AVD_DIR/config.ini"
               fi
               
-              echo "✅ Android Emulator created with Pixel 4 profile (1080x2280)"
-            displayName: 'Create Android Emulator'
+              echo "✅ Android Emulator created with API $(EMULATOR_API_LEVEL)"
+              echo "   Resolution: $(EMULATOR_RESOLUTION_WIDTH)x$(EMULATOR_RESOLUTION_HEIGHT) (412x915 dp)"
+              echo "   Density: $(EMULATOR_DENSITY) dpi"
+              echo "   ABI: x86_64"
+            displayName: 'Create Android Emulator (API 36)'
 
           - script: |
               set -e
-              echo "🚀 Starting Android Emulator..."
+              echo "🚀 Starting Android Emulator (API $(EMULATOR_API_LEVEL))..."
+              echo "   RAM: $(EMULATOR_RAM) MB | CPU Cores: $(EMULATOR_CORES)"
+              
               export PATH=$(ANDROID_HOME)/cmdline-tools/latest/bin:$(ANDROID_HOME)/platform-tools:$(ANDROID_HOME)/emulator:$PATH
               export ANDROID_HOME=$(ANDROID_HOME)
               export ANDROID_SDK_ROOT=$(ANDROID_HOME)
@@ -232,7 +273,7 @@ stages:
               # Check if KVM is available
               KVM_AVAILABLE=false
               if [ -e /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
-                echo "✅ KVM is available"
+                echo "✅ KVM is available - hardware acceleration enabled"
                 KVM_AVAILABLE=true
                 ACCEL_FLAG="-accel on"
               else
@@ -248,8 +289,8 @@ stages:
               adb start-server
               
               # Start emulator with optimized settings for CI
-              # Using -gpu swiftshader_indirect for better CI compatibility
-              echo "🚀 Launching emulator..."
+              # Using increased memory and cores as specified
+              echo "🚀 Launching emulator with enhanced resources..."
               nohup $(ANDROID_HOME)/emulator/emulator \
                 -avd test_emulator \
                 -no-window \
@@ -257,25 +298,27 @@ stages:
                 -no-boot-anim \
                 -gpu swiftshader_indirect \
                 $ACCEL_FLAG \
-                -memory 2048 \
-                -cores 2 \
+                -memory $(EMULATOR_RAM) \
+                -cores $(EMULATOR_CORES) \
                 -netfast \
                 -skip-adb-auth \
                 -no-snapshot \
                 -no-snapshot-load \
                 -no-snapshot-save \
                 -wipe-data \
+                -skin $(EMULATOR_RESOLUTION_WIDTH)x$(EMULATOR_RESOLUTION_HEIGHT) \
                 -verbose \
                 > emulator.log 2>&1 &
               
               EMULATOR_PID=$!
               echo "Emulator PID: $EMULATOR_PID"
+              echo "Emulator Config: API $(EMULATOR_API_LEVEL), $(EMULATOR_RESOLUTION_WIDTH)x$(EMULATOR_RESOLUTION_HEIGHT), $(EMULATOR_DENSITY)dpi, $(EMULATOR_RAM)MB RAM, $(EMULATOR_CORES) cores"
               
               # Wait for emulator to boot with proper timeout
               echo "⏳ Waiting for emulator device..."
               
-              # Wait for device with timeout (60 seconds)
-              DEVICE_TIMEOUT=60
+              # Wait for device with timeout (90 seconds for API 36)
+              DEVICE_TIMEOUT=90
               DEVICE_COUNTER=0
               while [ $DEVICE_COUNTER -lt $DEVICE_TIMEOUT ]; do
                 if adb devices | grep -q "emulator"; then
@@ -303,9 +346,9 @@ stages:
                 exit 1
               fi
               
-              # Wait for boot completion with timeout (180 seconds)
-              echo "⏳ Waiting for boot completion..."
-              BOOT_TIMEOUT=180
+              # Wait for boot completion with timeout (240 seconds for API 36 - it's larger)
+              echo "⏳ Waiting for boot completion (API 36 may take longer)..."
+              BOOT_TIMEOUT=240
               BOOT_COUNTER=0
               while [ $BOOT_COUNTER -lt $BOOT_TIMEOUT ]; do
                 BOOT_COMPLETED=$(adb -e shell getprop sys.boot_completed 2>/dev/null | tr -d '\r\n' || echo "")
@@ -337,9 +380,9 @@ stages:
                 exit 1
               fi
               
-              # Additional wait for system UI to be ready
-              echo "⏳ Waiting for system UI..."
-              sleep 15
+              # Additional wait for system UI to be ready (longer for API 36)
+              echo "⏳ Waiting for system UI to be ready..."
+              sleep 20
               
               # Disable animations for faster test execution
               adb -e shell settings put global window_animation_scale 0
@@ -349,10 +392,16 @@ stages:
               # Unlock screen
               adb -e shell input keyevent 82
               
-              echo "✅ Android Emulator started and booted successfully"
+              # Verify emulator properties
+              echo "📱 Emulator Properties:"
+              echo "   API Level: $(adb -e shell getprop ro.build.version.sdk)"
+              echo "   Screen Density: $(adb -e shell wm density)"
+              echo "   Screen Size: $(adb -e shell wm size)"
+              
+              echo "✅ Android Emulator (API $(EMULATOR_API_LEVEL)) started and booted successfully"
               adb devices -l
             displayName: 'Start Android Emulator'
-            timeoutInMinutes: 10
+            timeoutInMinutes: 15
 
           - script: |
               set -e
@@ -623,6 +672,3 @@ stages:
               mergeTestResults: true
               failTaskOnFailedTests: false
             condition: always()
-
-
-
