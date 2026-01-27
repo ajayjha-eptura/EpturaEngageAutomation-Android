@@ -244,10 +244,13 @@ public class DriverFactory {
             File scrFile = ((TakesScreenshot) driver).getScreenshotAs(OutputType.FILE);
             FileUtils.copyFile(scrFile, new File(filePath));
             
+            // Get Base64 screenshot for embedding in Extent report
             String base64Screenshot = ((TakesScreenshot) driver).getScreenshotAs(OutputType.BASE64);
             
+            // Use Base64 image embedding instead of file path for CI/CD compatibility
+            // This ensures screenshots display correctly in pipeline reports
             ExtentReportManager.getTest().info("📸 Screenshot: " + name,
-                    MediaEntityBuilder.createScreenCaptureFromPath("screenshots/" + fileName).build());
+                    MediaEntityBuilder.createScreenCaptureFromBase64String(base64Screenshot).build());
                     
             return base64Screenshot;
         } catch (Exception e) {
